@@ -10,7 +10,7 @@ public class PaypalPayment implements Payment {
     }
     @Override
     public boolean pay(){
-        System.out.printf("Using debit card to pay: %s%n",account);
+        System.out.printf("Using PayPal to pay: %s%n", account);
         return true;
     }
 }

@@ -11,7 +11,7 @@ public class CreditCardPayment implements Payment {
 
     @Override
     public boolean pay() {
-        System.out.printf("Using debit card to pay: %s%n",cardNumber);
+        System.out.printf("Using credit card to pay: %s%n",cardNumber);
         return true;
     }
 }

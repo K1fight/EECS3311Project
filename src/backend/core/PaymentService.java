@@ -8,7 +8,6 @@ import backend.payment.debitCard.DebitCardPaymentFactory;
 import backend.payment.paypal.PaypalPaymentFactory;
 
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Payment Service: Handles payment requests, validates payment information, simulates payment delays, updates booking status, and records transactions.
@@ -27,14 +26,8 @@ public class PaymentService {
             return false;
         }
 
-        // 3. Simulate payment processing delay (2-3 seconds)
-        try {
-            System.out.println("Processing payment...");
-            TimeUnit.SECONDS.sleep(2); // Simulate delay
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        }
+        // 3. Execute payment (no artificial blocking delay to avoid freezing UI / main thread)
+        System.out.println("Processing payment...");
 
         // 4. Execute payment
         boolean success = payment.pay();

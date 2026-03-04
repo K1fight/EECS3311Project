@@ -8,6 +8,7 @@ import backend.policy.PricingStrategy;
 import backend.service.ConsultingService;
 import backend.service.ServiceCategory;
 import backend.user.*;
+import backend.core.TimeSlot;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -46,10 +47,29 @@ public class BookingUI {
         // Initialize services
         bookingService = new BookingService();
         consultantService = new ConsultantService();
-        clientService = new ClientService(bookingService);
+        clientService = new ClientService(bookingService, consultantService);
         adminService = new AdminService(consultantService);
         paymentService = new PaymentService();
 
+        // Initialize demo data
+        initializeDemoData();
+    }
+
+    private void initializeDemoData() {
+        // Create demo clients
+        demoClients.put("1", new Client("Alice Johnson", "alice@example.com", "pass123"));
+        demoClients.put("2", new Client("Bob Smith", "bob@example.com", "pass456"));
+
+        // Create demo consultants
+        demoConsultants.put("1", new Consultant("Dr. John Doe", "john.doe@consulting.com", "consult123"));
+        demoConsultants.put("2", new Consultant("Prof. Jane Wilson", "jane.wilson@consulting.com", "consult456"));
+
+        // Create available services
+        availableServices = List.of(
+            new ConsultingService("Career Counseling", "Professional career guidance and advice", 100.0, 60, ServiceCategory.Career),
+            new ConsultingService("IT Consulting", "Technology and software development advice", 150.0, 90, ServiceCategory.Technology),
+            new ConsultingService("Financial Advisory", "Financial planning and investment advice", 200.0, 60, ServiceCategory.Finance)
+        );
     }
 
     public void run() {
@@ -473,8 +493,20 @@ public class BookingUI {
         System.out.print("Enter booking ID: ");
         String bookingIdStr = scanner.nextLine();
 
-        // Find booking (simplified - in real app would use bookingService)
-        System.out.println("Booking accepted!");
+        List<Booking> bookings = consultantService.getConsultantBookings(consultant);
+        for (Booking booking : bookings) {
+            if (booking.getBookingId().toString().equals(bookingIdStr)) {
+                try {
+                    consultantService.acceptBooking(consultant, booking);
+                    System.out.println("Booking accepted successfully!");
+                    return;
+                } catch (Exception e) {
+                    System.out.println("Failed to accept booking: " + e.getMessage());
+                    return;
+                }
+            }
+        }
+        System.out.println("Booking not found!");
     }
 
     private void rejectBooking(Consultant consultant) {
@@ -482,7 +514,20 @@ public class BookingUI {
         System.out.print("Enter booking ID: ");
         String bookingIdStr = scanner.nextLine();
 
-        System.out.println("Booking rejected!");
+        List<Booking> bookings = consultantService.getConsultantBookings(consultant);
+        for (Booking booking : bookings) {
+            if (booking.getBookingId().toString().equals(bookingIdStr)) {
+                try {
+                    consultantService.rejectBooking(consultant, booking);
+                    System.out.println("Booking rejected successfully!");
+                    return;
+                } catch (Exception e) {
+                    System.out.println("Failed to reject booking: " + e.getMessage());
+                    return;
+                }
+            }
+        }
+        System.out.println("Booking not found!");
     }
 
     private void completeBooking(Consultant consultant) {
@@ -490,7 +535,20 @@ public class BookingUI {
         System.out.print("Enter booking ID: ");
         String bookingIdStr = scanner.nextLine();
 
-        System.out.println("Booking completed!");
+        List<Booking> bookings = consultantService.getConsultantBookings(consultant);
+        for (Booking booking : bookings) {
+            if (booking.getBookingId().toString().equals(bookingIdStr)) {
+                try {
+                    consultantService.completeBooking(consultant, booking);
+                    System.out.println("Booking completed successfully!");
+                    return;
+                } catch (Exception e) {
+                    System.out.println("Failed to complete booking: " + e.getMessage());
+                    return;
+                }
+            }
+        }
+        System.out.println("Booking not found!");
     }
 
     private void manageAvailability(Consultant consultant) {

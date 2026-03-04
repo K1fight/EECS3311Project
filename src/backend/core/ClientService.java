@@ -16,6 +16,24 @@ import java.util.*;
 public class ClientService {
     private List<ConsultingService> services = new ArrayList<>();
     private Map<Client, List<Booking>> clientBookings = new HashMap<>();
+    private Map<Client, List<PaymentMethod>> clientPaymentMethods = new HashMap<>();
+    private BookingService bookingService;
+    private ConsultantService consultantService;
+
+    public ClientService() {
+        this.bookingService = new BookingService();
+        this.consultantService = new ConsultantService();
+    }
+
+    public ClientService(BookingService bookingService) {
+        this.bookingService = bookingService;
+        this.consultantService = new ConsultantService();
+    }
+
+    public ClientService(BookingService bookingService, ConsultantService consultantService) {
+        this.bookingService = bookingService;
+        this.consultantService = consultantService;
+    }
 
     public List<ConsultingService> browseServices() {
         return services; // Return all services
@@ -25,6 +43,12 @@ public class ClientService {
         // Check consultant availability (omitted)
         Booking booking = new Booking(client, consultant, service, startTime);
         clientBookings.computeIfAbsent(client, k -> new ArrayList<>()).add(booking);
+        
+        // Also add to consultant's bookings
+        if (consultantService != null) {
+            consultantService.addBookingToConsultant(booking);
+        }
+        
         // Notify consultant
         NotificationService.sendEmail(consultant, "New booking request from " + client.getName());
         return booking;
@@ -44,9 +68,13 @@ public class ClientService {
         return clientBookings.getOrDefault(client, Collections.emptyList());
     }
 
+    public List<PaymentMethod> getClientPaymentMethods(Client client) {
+        return clientPaymentMethods.getOrDefault(client, Collections.emptyList());
+    }
+
     public PaymentMethod addPaymentMethod(Client client, String type, Map<String, String> details) {
         PaymentMethod method = PaymentMethodFactory.createPaymentMethod(type, details);
-        // Save to client payment method list (omitted)
+        clientPaymentMethods.computeIfAbsent(client, k -> new ArrayList<>()).add(method);
         return method;
     }
 
