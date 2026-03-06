@@ -1,6 +1,9 @@
 # EECS 3311 Project (Phase 1)
 ## Service Booking & Consulting Platform
 
+## Github URL
+https://github.com/K1fight/EECS3311Project.git
+
 ## 1. What this project is
 This project is a **service booking and consulting platform**.  
 A **Client** can request a booking for a consulting service. A **Consultant** can accept or reject the request, and later complete the booking. The system also supports **simulated payments**, **cancellation rules**, and **basic access control**.
@@ -212,5 +215,13 @@ A quick demo path:
 
 ## 11. Team contribution (fill in)
 - Member A:  Bin Tang
+Responsible for backend
+github name: K1fight
+
 - Member B:  Zehao Liu
+Responsible for correction of backend and frontend and documentation
+github name: liu0205-mario
+
 - Member C:  Haiyun
+Responsible for diagrams
+github name: 3canary
