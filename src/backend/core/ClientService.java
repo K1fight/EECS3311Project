@@ -15,7 +15,8 @@ import java.util.*;
 public class ClientService {
     private List<ConsultingService> services = new ArrayList<>();
     private Map<Client, List<Booking>> clientBookings = new HashMap<>();
-    private Map<Client, List<PaymentMethod>> clientPaymentMethods = new HashMap<>();
+    // Store payment method details: type -> list of (type, details)
+    private Map<Client, List<Map<String, Object>>> clientPaymentMethods = new HashMap<>();
     private BookingService bookingService;
     private ConsultingService consultingService;
 
@@ -67,14 +68,34 @@ public class ClientService {
         return clientBookings.getOrDefault(client, Collections.emptyList());
     }
 
-    public List<PaymentMethod> getClientPaymentMethods(Client client) {
+    public List<Map<String, Object>> getClientPaymentMethods(Client client) {
         return clientPaymentMethods.getOrDefault(client, Collections.emptyList());
     }
 
     public PaymentMethod addPaymentMethod(Client client, String type, Map<String, String> details) {
         PaymentMethod method = PaymentMethodFactory.createPaymentMethod(type, details);
-        clientPaymentMethods.computeIfAbsent(client, k -> new ArrayList<>()).add(method);
+        
+        // Store both the method type and its details
+        Map<String, Object> paymentInfo = new HashMap<>();
+        paymentInfo.put("method", method);
+        paymentInfo.put("details", new HashMap<>(details));
+        
+        clientPaymentMethods.computeIfAbsent(client, k -> new ArrayList<>()).add(paymentInfo);
         return method;
+    }
+    
+    /**
+     * Get payment method details by index
+     * @param client The client
+     * @param methodIndex Index of the payment method (0-based)
+     * @return Map containing "method" (PaymentMethod) and "details" (Map<String, String>), or null if not found
+     */
+    public Map<String, Object> getPaymentMethodDetails(Client client, int methodIndex) {
+        List<Map<String, Object>> methods = clientPaymentMethods.get(client);
+        if (methods == null || methods.isEmpty() || methodIndex < 0 || methodIndex >= methods.size()) {
+            return null;
+        }
+        return methods.get(methodIndex);
     }
     
     /**
@@ -84,7 +105,7 @@ public class ClientService {
      * @return true if removed successfully, false otherwise
      */
     public boolean removePaymentMethod(Client client, int methodIndex) {
-        List<PaymentMethod> methods = clientPaymentMethods.get(client);
+        List<Map<String, Object>> methods = clientPaymentMethods.get(client);
         if (methods == null || methods.isEmpty()) {
             return false;
         }

@@ -515,17 +515,23 @@ public class BookingUI {
         }
 
         // Check if client has saved payment methods
-        List<PaymentMethod> savedMethods = clientService.getClientPaymentMethods(client);
+        List<Map<String, Object>> savedMethods = clientService.getClientPaymentMethods(client);
         
         PaymentMethod selectedMethod = null;
         Map<String, String> paymentDetails = null;
         
         if (!savedMethods.isEmpty()) {
-            // Client has saved payment methods, let them choose
+            // Client has saved payment methods with details, let them choose
             System.out.println("\nYour Saved Payment Methods:");
             int i = 1;
-            for (PaymentMethod method : savedMethods) {
-                System.out.printf("%d. %s%n", i++, method);
+            for (Map<String, Object> paymentInfo : savedMethods) {
+                PaymentMethod method = (PaymentMethod) paymentInfo.get("method");
+                @SuppressWarnings("unchecked")
+                Map<String, String> details = (Map<String, String>) paymentInfo.get("details");
+                
+                // Display masked payment info
+                String displayInfo = getMaskedPaymentInfo(method, details);
+                System.out.printf("%d. %s - %s%n", i++, method, displayInfo);
             }
             System.out.printf("%d. Add New Payment Method%n", savedMethods.size() + 1);
             System.out.print("Select payment method (1-" + (savedMethods.size() + 1) + "): ");
@@ -536,10 +542,13 @@ public class BookingUI {
                 int choice = Integer.parseInt(methodChoice);
                 
                 if (choice >= 1 && choice <= savedMethods.size()) {
-                    // Use existing payment method
-                    selectedMethod = savedMethods.get(choice - 1);
-                    // Need to collect payment details for validation
-                    paymentDetails = collectPaymentDetails(selectedMethod);
+                    // Use existing payment method with stored details
+                    Map<String, Object> paymentInfo = clientService.getPaymentMethodDetails(client, choice - 1);
+                    if (paymentInfo != null) {
+                        selectedMethod = (PaymentMethod) paymentInfo.get("method");
+                        paymentDetails = (Map<String, String>) paymentInfo.get("details");
+                        System.out.println("Using saved payment method: " + selectedMethod);
+                    }
                 } else if (choice == savedMethods.size() + 1) {
                     // Add new payment method
                     selectedMethod = addNewPaymentMethodForPayment(client);
@@ -680,7 +689,7 @@ public class BookingUI {
     
     private void viewPaymentMethods(Client client) {
         System.out.println("\n--- Your Payment Methods ---");
-        List<PaymentMethod> methods = clientService.getClientPaymentMethods(client);
+        List<Map<String, Object>> methods = clientService.getClientPaymentMethods(client);
         
         if (methods.isEmpty()) {
             System.out.println("No payment methods found. Please add a payment method first.");
@@ -689,14 +698,18 @@ public class BookingUI {
         
         System.out.println("You have " + methods.size() + " payment method(s):");
         int i = 1;
-        for (PaymentMethod method : methods) {
-            System.out.printf("%d. %s%n", i++, method);
+        for (Map<String, Object> paymentInfo : methods) {
+            PaymentMethod method = (PaymentMethod) paymentInfo.get("method");
+            @SuppressWarnings("unchecked")
+            Map<String, String> details = (Map<String, String>) paymentInfo.get("details");
+            String displayInfo = getMaskedPaymentInfo(method, details);
+            System.out.printf("%d. %s - %s%n", i++, method, displayInfo);
         }
     }
     
     private void removePaymentMethod(Client client) {
         System.out.println("\n--- Remove Payment Method ---");
-        List<PaymentMethod> methods = clientService.getClientPaymentMethods(client);
+        List<Map<String, Object>> methods = clientService.getClientPaymentMethods(client);
         
         if (methods.isEmpty()) {
             System.out.println("No payment methods to remove.");
@@ -705,8 +718,12 @@ public class BookingUI {
         
         System.out.println("Your payment methods:");
         int i = 1;
-        for (PaymentMethod method : methods) {
-            System.out.printf("%d. %s%n", i++, method);
+        for (Map<String, Object> paymentInfo : methods) {
+            PaymentMethod method = (PaymentMethod) paymentInfo.get("method");
+            @SuppressWarnings("unchecked")
+            Map<String, String> details = (Map<String, String>) paymentInfo.get("details");
+            String displayInfo = getMaskedPaymentInfo(method, details);
+            System.out.printf("%d. %s - %s%n", i++, method, displayInfo);
         }
         
         System.out.print("\nEnter the number of the payment method to remove (1-" + methods.size() + ", or 0 to cancel): ");
@@ -996,6 +1013,32 @@ public class BookingUI {
         currentUser = null;
         isLoggedIn = false;
         System.out.println("Logged out successfully!");
+    }
+
+    /**
+     * Get masked payment info for display
+     */
+    private String getMaskedPaymentInfo(PaymentMethod method, Map<String, String> details) {
+        switch (method) {
+            case Credit:
+            case Debit:
+                String cardNum = details.get("cardNumber");
+                if (cardNum != null && cardNum.length() >= 4) {
+                    return "**** **** **** " + cardNum.substring(cardNum.length() - 4);
+                }
+                return "Card";
+            case Paypal:
+                String email = details.get("email");
+                return email != null ? email : "PayPal";
+            case BankTransfer:
+                String account = details.get("accountNumber");
+                if (account != null && account.length() >= 4) {
+                    return "Account ****" + account.substring(account.length() - 4);
+                }
+                return "Bank Transfer";
+            default:
+                return "";
+        }
     }
 
     /**
