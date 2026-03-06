@@ -3,6 +3,7 @@ package backend.core;
 import backend.user.Consultant;
 import backend.policy.CancellationPolicy;
 import backend.policy.PricingStrategy;
+import backend.policy.SystemPolicy;
 
 public class AdminService {
     private ConsultingService consultingService;
@@ -43,9 +44,11 @@ public class AdminService {
 
     public void setCancellationPolicy(CancellationPolicy policy) {
         // Global policy replacement
+        SystemPolicy.setCancellationPolicy(policy);
     }
 
     public void setPricingStrategy(PricingStrategy strategy) {
         // Global policy replacement
+        SystemPolicy.setPricingStrategy(strategy);
     }
 }

@@ -7,6 +7,7 @@ import backend.core.ConsultingService;
 import backend.service.ServiceCategory;
 import backend.user.*;
 import backend.core.TimeSlot;
+import backend.policy.*;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -107,7 +108,13 @@ public class BookingUI {
                 System.exit(0);
                 break;
             default:
-                System.out.println("Invalid option!");
+                System.out.println("Invalid option! Please try again.");
+        }
+        
+        // Continue showing login menu if not logged in
+        if (!isLoggedIn) {
+            System.out.println("\nPress Enter to continue...");
+            scanner.nextLine();
         }
     }
 
@@ -122,7 +129,10 @@ public class BookingUI {
             User authenticatedUser = userService.authenticateUser(email, password);
             
             if (authenticatedUser instanceof Client) {
-                currentUser = authenticatedUser;
+                // Use UserProxy to control permissions
+                UserProxy userProxy = new UserProxy(authenticatedUser);
+                currentUser = userProxy;
+                userProxy.logIn();
                 isLoggedIn = true;
                 System.out.println("Welcome, " + client.getName() + "!");
             }
@@ -142,7 +152,15 @@ public class BookingUI {
             User authenticatedUser = userService.authenticateUser(email, password);
             
             if (authenticatedUser instanceof Consultant) {
-                currentUser = authenticatedUser;
+                // Check if consultant is approved
+                if (!consultant.isApproved()) {
+                    System.out.println("Your account is pending approval. Please wait for admin approval.");
+                    return;
+                }
+                // Use UserProxy to control permissions
+                UserProxy userProxy = new UserProxy(authenticatedUser);
+                currentUser = userProxy;
+                userProxy.logIn();
                 isLoggedIn = true;
                 System.out.println("Welcome, " + consultant.getName() + "!");
             }
@@ -152,7 +170,11 @@ public class BookingUI {
     }
 
     private void loginAsAdmin() {
-        currentUser = new Admin("System Admin", "admin@system.com", "admin");
+        Admin admin = new Admin("System Admin", "admin@system.com", "admin");
+        // Use UserProxy to control permissions
+        UserProxy userProxy = new UserProxy(admin);
+        currentUser = userProxy;
+        userProxy.logIn();
         isLoggedIn = true;
         System.out.println("Welcome, Administrator!");
     }
@@ -195,17 +217,35 @@ public class BookingUI {
         System.out.println("\n=== Main Menu ===");
         System.out.println("Logged in as: " + currentUser.getName() + " (" + currentUser.getAccountType() + ")");
 
-        if (currentUser instanceof Client) {
+        // Get the real user from proxy if needed
+        User realUser = currentUser;
+        if (currentUser instanceof UserProxy) {
+            // Use reflection or casting to get the real user
+            try {
+                java.lang.reflect.Field field = UserProxy.class.getDeclaredField("realUser");
+                field.setAccessible(true);
+                realUser = (User) field.get(currentUser);
+            } catch (Exception e) {
+                System.out.println("Error accessing real user: " + e.getMessage());
+            }
+        }
+
+        if (realUser instanceof Client) {
             showClientMenu();
-        } else if (currentUser instanceof Consultant) {
+        } else if (realUser instanceof Consultant) {
             showConsultantMenu();
-        } else if (currentUser instanceof Admin) {
+        } else if (realUser instanceof Admin) {
             showAdminMenu();
         }
     }
 
     private void showClientMenu() {
-        Client client = (Client) currentUser;
+        // Get the real client from proxy
+        Client client = getRealUser(Client.class);
+        if (client == null) {
+            System.out.println("Error: Not a valid client session.");
+            return;
+        }
 
         System.out.println("\n--- Client Options ---");
         System.out.println("1. Browse Services");
@@ -244,10 +284,21 @@ public class BookingUI {
             default:
                 System.out.println("Invalid option!");
         }
+        
+        // Pause after menu operation
+        if (isLoggedIn) {
+            System.out.println("\nPress Enter to continue...");
+            scanner.nextLine();
+        }
     }
 
     private void showConsultantMenu() {
-        Consultant consultant = (Consultant) currentUser;
+        // Get the real consultant from proxy
+        Consultant consultant = getRealUser(Consultant.class);
+        if (consultant == null) {
+            System.out.println("Error: Not a valid consultant session.");
+            return;
+        }
 
         System.out.println("\n--- Consultant Options ---");
         System.out.println("1. View My Bookings");
@@ -282,9 +333,22 @@ public class BookingUI {
             default:
                 System.out.println("Invalid option!");
         }
+        
+        // Pause after menu operation
+        if (isLoggedIn) {
+            System.out.println("\nPress Enter to continue...");
+            scanner.nextLine();
+        }
     }
 
     private void showAdminMenu() {
+        // Get the real admin from proxy
+        Admin admin = getRealUser(Admin.class);
+        if (admin == null) {
+            System.out.println("Error: Not a valid admin session.");
+            return;
+        }
+
         System.out.println("\n--- Admin Options ---");
         System.out.println("1. Approve Consultant");
         System.out.println("2. Reject Consultant");
@@ -317,6 +381,12 @@ public class BookingUI {
                 break;
             default:
                 System.out.println("Invalid option!");
+        }
+        
+        // Pause after menu operation
+        if (isLoggedIn) {
+            System.out.println("\nPress Enter to continue...");
+            scanner.nextLine();
         }
     }
 
@@ -444,52 +514,63 @@ public class BookingUI {
             return;
         }
 
-        System.out.println("\nPayment Methods:");
-        System.out.println("1. Credit Card");
-        System.out.println("2. Debit Card");
-        System.out.println("3. PayPal");
-        System.out.println("4. Bank Transfer");
-        System.out.print("Select payment method: ");
-        String methodChoice = scanner.nextLine();
-
-        Map<String, String> details = new HashMap<>();
-        switch (methodChoice) {
-            case "1":
-                System.out.print("Enter card number (16 digits): ");
-                details.put("cardNumber", scanner.nextLine());
-                System.out.print("Enter expiry (MM/YY): ");
-                details.put("expiry", scanner.nextLine());
-                System.out.print("Enter CVV: ");
-                details.put("cvv", scanner.nextLine());
-                break;
-            case "2":
-                System.out.print("Enter card number (16 digits): ");
-                details.put("cardNumber", scanner.nextLine());
-                System.out.print("Enter expiry (MM/YY): ");
-                details.put("expiry", scanner.nextLine());
-                System.out.print("Enter CVV: ");
-                details.put("cvv", scanner.nextLine());
-                break;
-            case "3":
-                System.out.print("Enter PayPal email: ");
-                details.put("email", scanner.nextLine());
-                break;
-            case "4":
-                System.out.print("Enter account number: ");
-                details.put("accountNumber", scanner.nextLine());
-                System.out.print("Enter routing number: ");
-                details.put("routingNumber", scanner.nextLine());
-                break;
-            default:
-                System.out.println("Invalid payment method!");
+        // Check if client has saved payment methods
+        List<PaymentMethod> savedMethods = clientService.getClientPaymentMethods(client);
+        
+        PaymentMethod selectedMethod = null;
+        Map<String, String> paymentDetails = null;
+        
+        if (!savedMethods.isEmpty()) {
+            // Client has saved payment methods, let them choose
+            System.out.println("\nYour Saved Payment Methods:");
+            int i = 1;
+            for (PaymentMethod method : savedMethods) {
+                System.out.printf("%d. %s%n", i++, method);
+            }
+            System.out.printf("%d. Add New Payment Method%n", savedMethods.size() + 1);
+            System.out.print("Select payment method (1-" + (savedMethods.size() + 1) + "): ");
+            
+            String methodChoice = scanner.nextLine();
+            
+            try {
+                int choice = Integer.parseInt(methodChoice);
+                
+                if (choice >= 1 && choice <= savedMethods.size()) {
+                    // Use existing payment method
+                    selectedMethod = savedMethods.get(choice - 1);
+                    // Need to collect payment details for validation
+                    paymentDetails = collectPaymentDetails(selectedMethod);
+                } else if (choice == savedMethods.size() + 1) {
+                    // Add new payment method
+                    selectedMethod = addNewPaymentMethodForPayment(client);
+                    if (selectedMethod != null) {
+                        // Collect details for the newly added method
+                        paymentDetails = collectPaymentDetails(selectedMethod);
+                    }
+                } else {
+                    System.out.println("Invalid selection!");
+                    return;
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input!");
                 return;
+            }
+        } else {
+            // No saved payment methods, must add a new one
+            System.out.println("\nNo saved payment methods found. Please add a payment method.");
+            selectedMethod = addNewPaymentMethodForPayment(client);
+            if (selectedMethod != null) {
+                paymentDetails = collectPaymentDetails(selectedMethod);
+            }
         }
-
-        PaymentMethod method = PaymentMethod.valueOf(methodChoice.equals("1") ? "Credit" :
-                methodChoice.equals("2") ? "Debit" :
-                        methodChoice.equals("3") ? "Paypal" : "BankTransfer");
-
-        boolean success = paymentService.processPayment(targetBooking, method, details);
+        
+        if (selectedMethod == null || paymentDetails == null) {
+            System.out.println("Payment method setup cancelled.");
+            return;
+        }
+        
+        // Process payment with selected method and details
+        boolean success = paymentService.processPayment(targetBooking, selectedMethod, paymentDetails);
         System.out.println(success ? "Payment successful!" : "Payment failed!");
     }
 
@@ -821,17 +902,246 @@ public class BookingUI {
 
     private void setCancellationPolicy() {
         System.out.println("\n=== Set Cancellation Policy ===");
-        System.out.println("Policy updated!");
+        System.out.println("Available Cancellation Policies:");
+        System.out.println("1. Default Policy (100% refund 48h before, 50% 24h before)");
+        System.out.println("2. Flexible Policy (Customizable)");
+        System.out.print("Select policy type (1-2): ");
+        
+        String choice = scanner.nextLine();
+        
+        switch (choice) {
+            case "1":
+                adminService.setCancellationPolicy(new DefaultCancellationPolicy());
+                System.out.println("✓ Default cancellation policy has been set.");
+                break;
+                
+            case "2":
+                try {
+                    System.out.print("Enter full refund hours before booking (default 48): ");
+                    int fullRefundHours = Integer.parseInt(scanner.nextLine());
+                    
+                    System.out.print("Enter partial refund hours before booking (default 24): ");
+                    int partialRefundHours = Integer.parseInt(scanner.nextLine());
+                    
+                    System.out.print("Enter partial refund percentage (0.0-1.0, default 0.5): ");
+                    double partialPercentage = Double.parseDouble(scanner.nextLine());
+                    
+                    FlexibleCancellationPolicy policy = new FlexibleCancellationPolicy(
+                        fullRefundHours, partialRefundHours, partialPercentage
+                    );
+                    adminService.setCancellationPolicy(policy);
+                    System.out.println("✓ Flexible cancellation policy has been set.");
+                    System.out.printf("  - Full refund: %d hours before%n", fullRefundHours);
+                    System.out.printf("  - Partial refund (%.0f%%): %d hours before%n", 
+                        partialPercentage * 100, partialRefundHours);
+                } catch (NumberFormatException e) {
+                    System.out.println("Invalid input! Using default flexible policy.");
+                    adminService.setCancellationPolicy(new FlexibleCancellationPolicy());
+                }
+                break;
+                
+            default:
+                System.out.println("Invalid option!");
+        }
     }
 
     private void setPricingStrategy() {
         System.out.println("\n=== Set Pricing Strategy ===");
-        System.out.println("Strategy updated!");
+        System.out.println("Available Pricing Strategies:");
+        System.out.println("1. Fixed Pricing (Base price only)");
+        System.out.println("2. Dynamic Pricing (Varies by time and day)");
+        System.out.print("Select strategy type (1-2): ");
+        
+        String choice = scanner.nextLine();
+        
+        switch (choice) {
+            case "1":
+                adminService.setPricingStrategy(new FixedPricingStrategy());
+                System.out.println("✓ Fixed pricing strategy has been set.");
+                break;
+                
+            case "2":
+                try {
+                    DynamicPricingStrategy strategy = new DynamicPricingStrategy();
+                    
+                    System.out.print("Enter peak hours multiplier (default 1.5): ");
+                    String peakInput = scanner.nextLine();
+                    if (!peakInput.isEmpty()) {
+                        strategy.setPeakMultiplier(Double.parseDouble(peakInput));
+                    }
+                    
+                    System.out.print("Enter off-peak hours multiplier (default 0.8): ");
+                    String offPeakInput = scanner.nextLine();
+                    if (!offPeakInput.isEmpty()) {
+                        strategy.setOffPeakMultiplier(Double.parseDouble(offPeakInput));
+                    }
+                    
+                    adminService.setPricingStrategy(strategy);
+                    System.out.println("✓ Dynamic pricing strategy has been set.");
+                    System.out.println("  - Peak hours (9AM-5PM weekdays): Higher rates");
+                    System.out.println("  - Weekends: 20% surcharge");
+                    System.out.println("  - Off-peak: Discounted rates");
+                } catch (NumberFormatException e) {
+                    System.out.println("Invalid input! Using default dynamic pricing.");
+                    adminService.setPricingStrategy(new DynamicPricingStrategy());
+                }
+                break;
+                
+            default:
+                System.out.println("Invalid option!");
+        }
     }
 
     private void logout() {
         currentUser = null;
         isLoggedIn = false;
         System.out.println("Logged out successfully!");
+    }
+
+    /**
+     * Helper method to collect payment details based on payment method type
+     * @param method The payment method type
+     * @return Map containing payment details, or null if cancelled
+     */
+    private Map<String, String> collectPaymentDetails(PaymentMethod method) {
+        Map<String, String> details = new HashMap<>();
+        
+        System.out.println("\n--- Enter Payment Details for " + method + " ---");
+        
+        switch (method) {
+            case Credit:
+            case Debit:
+                System.out.print("Enter card number (16 digits): ");
+                details.put("cardNumber", scanner.nextLine());
+                System.out.print("Enter expiry (MM/YY): ");
+                details.put("expiry", scanner.nextLine());
+                System.out.print("Enter CVV: ");
+                details.put("cvv", scanner.nextLine());
+                break;
+                
+            case Paypal:
+                System.out.print("Enter PayPal email: ");
+                details.put("email", scanner.nextLine());
+                break;
+                
+            case BankTransfer:
+                System.out.print("Enter account number: ");
+                details.put("accountNumber", scanner.nextLine());
+                System.out.print("Enter routing number: ");
+                details.put("routingNumber", scanner.nextLine());
+                break;
+                
+            default:
+                System.out.println("Unsupported payment method!");
+                return null;
+        }
+        
+        return details;
+    }
+
+    /**
+     * Helper method to add a new payment method during payment process
+     * @param client The client adding the payment method
+     * @return The newly created payment method, or null if cancelled
+     */
+    private PaymentMethod addNewPaymentMethodForPayment(Client client) {
+        System.out.println("\n--- Add New Payment Method ---");
+        System.out.println("Available Payment Types:");
+        System.out.println("1. Credit Card");
+        System.out.println("2. Debit Card");
+        System.out.println("3. PayPal");
+        System.out.println("4. Bank Transfer");
+        System.out.print("Select payment type (1-4): ");
+        
+        String typeChoice = scanner.nextLine();
+        String type;
+        Map<String, String> details = new HashMap<>();
+        
+        switch (typeChoice) {
+            case "1":
+                type = "Credit";
+                System.out.print("Enter card number (16 digits): ");
+                details.put("cardNumber", scanner.nextLine());
+                System.out.print("Enter expiry (MM/YY): ");
+                details.put("expiry", scanner.nextLine());
+                System.out.print("Enter CVV: ");
+                details.put("cvv", scanner.nextLine());
+                System.out.print("Enter cardholder name: ");
+                details.put("cardholderName", scanner.nextLine());
+                break;
+                
+            case "2":
+                type = "Debit";
+                System.out.print("Enter card number (16 digits): ");
+                details.put("cardNumber", scanner.nextLine());
+                System.out.print("Enter expiry (MM/YY): ");
+                details.put("expiry", scanner.nextLine());
+                System.out.print("Enter CVV: ");
+                details.put("cvv", scanner.nextLine());
+                System.out.print("Enter cardholder name: ");
+                details.put("cardholderName", scanner.nextLine());
+                break;
+                
+            case "3":
+                type = "Paypal";
+                System.out.print("Enter PayPal email: ");
+                details.put("email", scanner.nextLine());
+                break;
+                
+            case "4":
+                type = "BankTransfer";
+                System.out.print("Enter account number: ");
+                details.put("accountNumber", scanner.nextLine());
+                System.out.print("Enter routing number: ");
+                details.put("routingNumber", scanner.nextLine());
+                System.out.print("Enter bank name: ");
+                details.put("bankName", scanner.nextLine());
+                System.out.print("Enter account holder name: ");
+                details.put("accountHolderName", scanner.nextLine());
+                break;
+                
+            default:
+                System.out.println("Invalid payment type!");
+                return null;
+        }
+        
+        try {
+            PaymentMethod method = clientService.addPaymentMethod(client, type, details);
+            if (method != null) {
+                System.out.println("\n✓ Payment method added successfully!");
+                System.out.println("Type: " + method);
+                return method;
+            } else {
+                System.out.println("\n✗ Failed to add payment method.");
+                return null;
+            }
+        } catch (Exception e) {
+            System.out.println("\n✗ Error: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Helper method to get the real user from UserProxy
+     * @param <T> The expected user type
+     * @param userType The class of the expected user type
+     * @return The real user object, or null if not matching
+     */
+    private <T extends User> T getRealUser(Class<T> userType) {
+        if (currentUser instanceof UserProxy) {
+            try {
+                java.lang.reflect.Field field = UserProxy.class.getDeclaredField("realUser");
+                field.setAccessible(true);
+                User realUser = (User) field.get(currentUser);
+                if (userType.isInstance(realUser)) {
+                    return userType.cast(realUser);
+                }
+            } catch (Exception e) {
+                System.out.println("Error accessing real user: " + e.getMessage());
+            }
+        } else if (userType.isInstance(currentUser)) {
+            return userType.cast(currentUser);
+        }
+        return null;
     }
 }

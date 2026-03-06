@@ -1,5 +1,7 @@
 package backend.policy;
 
+import backend.booking.Booking;
+
 public interface PricingStrategy {
-    public void calculate();
+    double calculatePrice(Booking booking);
 }
