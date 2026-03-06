@@ -5,7 +5,6 @@ import backend.user.Consultant;
 import backend.booking.Booking;
 import backend.payment.PaymentMethod;
 import backend.payment.PaymentMethodFactory;
-import backend.service.ConsultingService;
 import backend.notification.NotificationService;
 import backend.policy.CancellationPolicy;
 import backend.policy.DefaultCancellationPolicy;
@@ -18,21 +17,21 @@ public class ClientService {
     private Map<Client, List<Booking>> clientBookings = new HashMap<>();
     private Map<Client, List<PaymentMethod>> clientPaymentMethods = new HashMap<>();
     private BookingService bookingService;
-    private ConsultantService consultantService;
+    private ConsultingService consultingService;
 
     public ClientService() {
         this.bookingService = new BookingService();
-        this.consultantService = new ConsultantService();
+        this.consultingService = new ConsultingService();
     }
 
     public ClientService(BookingService bookingService) {
         this.bookingService = bookingService;
-        this.consultantService = new ConsultantService();
+        this.consultingService = new ConsultingService();
     }
 
-    public ClientService(BookingService bookingService, ConsultantService consultantService) {
+    public ClientService(BookingService bookingService, ConsultingService consultingService) {
         this.bookingService = bookingService;
-        this.consultantService = consultantService;
+        this.consultingService = consultingService;
     }
 
     public List<ConsultingService> browseServices() {
@@ -45,8 +44,8 @@ public class ClientService {
         clientBookings.computeIfAbsent(client, k -> new ArrayList<>()).add(booking);
         
         // Also add to consultant's bookings
-        if (consultantService != null) {
-            consultantService.addBookingToConsultant(booking);
+        if (consultingService != null) {
+            consultingService.addBookingToConsultant(booking);
         }
         
         // Notify consultant
@@ -76,6 +75,37 @@ public class ClientService {
         PaymentMethod method = PaymentMethodFactory.createPaymentMethod(type, details);
         clientPaymentMethods.computeIfAbsent(client, k -> new ArrayList<>()).add(method);
         return method;
+    }
+    
+    /**
+     * Remove a specific payment method for a client
+     * @param client The client
+     * @param methodIndex Index of the payment method to remove (0-based)
+     * @return true if removed successfully, false otherwise
+     */
+    public boolean removePaymentMethod(Client client, int methodIndex) {
+        List<PaymentMethod> methods = clientPaymentMethods.get(client);
+        if (methods == null || methods.isEmpty()) {
+            return false;
+        }
+        
+        if (methodIndex >= 0 && methodIndex < methods.size()) {
+            methods.remove(methodIndex);
+            System.out.println("Payment method removed successfully.");
+            return true;
+        }
+        
+        System.out.println("Invalid payment method index.");
+        return false;
+    }
+    
+    /**
+     * Remove all payment methods for a client
+     * @param client The client
+     */
+    public void removeAllPaymentMethods(Client client) {
+        clientPaymentMethods.remove(client);
+        System.out.println("All payment methods removed.");
     }
 
     // Other methods...

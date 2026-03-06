@@ -3,19 +3,14 @@ package frontend;
 import backend.booking.Booking;
 import backend.core.*;
 import backend.payment.PaymentMethod;
-import backend.policy.CancellationPolicy;
-import backend.policy.PricingStrategy;
-import backend.service.ConsultingService;
+import backend.core.ConsultingService;
 import backend.service.ServiceCategory;
 import backend.user.*;
 import backend.core.TimeSlot;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Scanner;
+import java.util.*;
 
 public class BookingUI {
     private Scanner scanner = new Scanner(System.in);
@@ -24,17 +19,16 @@ public class BookingUI {
     // Services
     private AdminService adminService;
     private ClientService clientService;
-    private ConsultantService consultantService;
+    private ConsultingService consultingService;
     private BookingService bookingService;
     private PaymentService paymentService;
+    private UserService userService;
 
     // Current user
     private User currentUser;
     private boolean isLoggedIn = false;
 
-    // Demo data
-    private Map<String, Client> demoClients = new HashMap<>();
-    private Map<String, Consultant> demoConsultants = new HashMap<>();
+    // Available services
     private List<ConsultingService> availableServices;
 
     public static void main(String[] args) {
@@ -46,30 +40,24 @@ public class BookingUI {
     public void initialize() {
         // Initialize services
         bookingService = new BookingService();
-        consultantService = new ConsultantService();
-        clientService = new ClientService(bookingService, consultantService);
-        adminService = new AdminService(consultantService);
+        consultingService = new ConsultingService();
+        userService = new UserService();
+        clientService = new ClientService(bookingService, consultingService);
+        adminService = new AdminService(consultingService, userService);
         paymentService = new PaymentService();
 
-        // Initialize demo data
-        initializeDemoData();
+        // Initialize available services
+        initializeServices();
     }
 
-    private void initializeDemoData() {
-        // Create demo clients
-        demoClients.put("1", new Client("Alice Johnson", "alice@example.com", "pass123"));
-        demoClients.put("2", new Client("Bob Smith", "bob@example.com", "pass456"));
-
-        // Create demo consultants
-        demoConsultants.put("1", new Consultant("Dr. John Doe", "john.doe@consulting.com", "consult123"));
-        demoConsultants.put("2", new Consultant("Prof. Jane Wilson", "jane.wilson@consulting.com", "consult456"));
-
-        // Create available services
-        availableServices = List.of(
-            new ConsultingService("Career Counseling", "Professional career guidance and advice", 100.0, 60, ServiceCategory.Career),
-            new ConsultingService("IT Consulting", "Technology and software development advice", 150.0, 90, ServiceCategory.Technology),
-            new ConsultingService("Financial Advisory", "Financial planning and investment advice", 200.0, 60, ServiceCategory.Finance)
-        );
+    private void initializeServices() {
+        // Create available consulting services
+        availableServices = new ArrayList<>();
+        availableServices.add(new ConsultingService("Career Counseling", "Professional career guidance and advice", 100.0, 60, ServiceCategory.Career));
+        availableServices.add(new ConsultingService("IT Consulting", "Technology and software development advice", 150.0, 90, ServiceCategory.Technology));
+        availableServices.add(new ConsultingService("Financial Advisory", "Financial planning and investment advice", 200.0, 60, ServiceCategory.Finance));
+        
+        System.out.println("System initialized with " + availableServices.size() + " consulting services.");
     }
 
     public void run() {
@@ -91,7 +79,9 @@ public class BookingUI {
         System.out.println("1. Login as Client");
         System.out.println("2. Login as Consultant");
         System.out.println("3. Login as Admin");
-        System.out.println("4. Exit");
+        System.out.println("4. Register as Client");
+        System.out.println("5. Register as Consultant");
+        System.out.println("6. Exit");
         System.out.print("Choose option: ");
 
         String choice = scanner.nextLine();
@@ -107,6 +97,12 @@ public class BookingUI {
                 loginAsAdmin();
                 break;
             case "4":
+                registerClient();
+                break;
+            case "5":
+                registerConsultant();
+                break;
+            case "6":
                 System.out.println("Goodbye!");
                 System.exit(0);
                 break;
@@ -116,30 +112,42 @@ public class BookingUI {
     }
 
     private void loginAsClient() {
-        System.out.print("Enter client ID (1 or 2): ");
-        String clientId = scanner.nextLine();
-        Client client = demoClients.get(clientId);
+        System.out.print("Enter client email: ");
+        String email = scanner.nextLine();
+        Client client = userService.getClientByEmail(email);
 
         if (client != null) {
-            currentUser = client;
-            isLoggedIn = true;
-            System.out.println("Welcome, " + client.getName() + "!");
+            System.out.print("Enter password: ");
+            String password = scanner.nextLine();
+            User authenticatedUser = userService.authenticateUser(email, password);
+            
+            if (authenticatedUser instanceof Client) {
+                currentUser = authenticatedUser;
+                isLoggedIn = true;
+                System.out.println("Welcome, " + client.getName() + "!");
+            }
         } else {
-            System.out.println("Invalid client ID!");
+            System.out.println("Client not found! Please register first.");
         }
     }
 
     private void loginAsConsultant() {
-        System.out.print("Enter consultant ID (1 or 2): ");
-        String consultantId = scanner.nextLine();
-        Consultant consultant = demoConsultants.get(consultantId);
+        System.out.print("Enter consultant email: ");
+        String email = scanner.nextLine();
+        Consultant consultant = userService.getConsultantByEmail(email);
 
         if (consultant != null) {
-            currentUser = consultant;
-            isLoggedIn = true;
-            System.out.println("Welcome, " + consultant.getName() + "!");
+            System.out.print("Enter password: ");
+            String password = scanner.nextLine();
+            User authenticatedUser = userService.authenticateUser(email, password);
+            
+            if (authenticatedUser instanceof Consultant) {
+                currentUser = authenticatedUser;
+                isLoggedIn = true;
+                System.out.println("Welcome, " + consultant.getName() + "!");
+            }
         } else {
-            System.out.println("Invalid consultant ID!");
+            System.out.println("Consultant not found! Please register first.");
         }
     }
 
@@ -147,6 +155,40 @@ public class BookingUI {
         currentUser = new Admin("System Admin", "admin@system.com", "admin");
         isLoggedIn = true;
         System.out.println("Welcome, Administrator!");
+    }
+
+    private void registerClient() {
+        System.out.println("\n=== Register as Client ===");
+        System.out.print("Enter your name: ");
+        String name = scanner.nextLine();
+        System.out.print("Enter your email: ");
+        String email = scanner.nextLine();
+        System.out.print("Enter password (at least 6 characters): ");
+        String password = scanner.nextLine();
+
+        Client client = userService.registerClient(name, email, password);
+        if (client != null) {
+            System.out.println("Registration successful! You can now login.");
+        } else {
+            System.out.println("Registration failed. Please check your input and try again.");
+        }
+    }
+
+    private void registerConsultant() {
+        System.out.println("\n=== Register as Consultant ===");
+        System.out.print("Enter your name: ");
+        String name = scanner.nextLine();
+        System.out.print("Enter your email: ");
+        String email = scanner.nextLine();
+        System.out.print("Enter password (at least 6 characters): ");
+        String password = scanner.nextLine();
+
+        Consultant consultant = userService.registerConsultant(name, email, password);
+        if (consultant != null) {
+            System.out.println("Registration successful! You can now login.");
+        } else {
+            System.out.println("Registration failed. Please check your input and try again.");
+        }
     }
 
     private void showMainmenu() {
@@ -246,9 +288,10 @@ public class BookingUI {
         System.out.println("\n--- Admin Options ---");
         System.out.println("1. Approve Consultant");
         System.out.println("2. Reject Consultant");
-        System.out.println("3. Set Cancellation Policy");
-        System.out.println("4. Set Pricing Strategy");
-        System.out.println("5. Logout");
+        System.out.println("3. View Pending Consultants");
+        System.out.println("4. Set Cancellation Policy");
+        System.out.println("5. Set Pricing Strategy");
+        System.out.println("6. Logout");
         System.out.print("Choose option: ");
 
         String choice = scanner.nextLine();
@@ -261,12 +304,15 @@ public class BookingUI {
                 rejectConsultant();
                 break;
             case "3":
-                setCancellationPolicy();
+                viewPendingConsultants();
                 break;
             case "4":
-                setPricingStrategy();
+                setCancellationPolicy();
                 break;
             case "5":
+                setPricingStrategy();
+                break;
+            case "6":
                 logout();
                 break;
             default:
@@ -297,15 +343,27 @@ public class BookingUI {
         }
         ConsultingService service = availableServices.get(serviceIndex);
 
-        // Select consultant
+        // Select consultant from registered consultants
+        Collection<Consultant> allConsultants = userService.getAllConsultants();
+        if (allConsultants.isEmpty()) {
+            System.out.println("No consultants available yet. Please wait for consultants to register.");
+            return;
+        }
+        
         System.out.println("\nAvailable Consultants:");
         int i = 1;
-        for (Consultant consultant : demoConsultants.values()) {
+        for (Consultant consultant : allConsultants) {
             System.out.printf("%d. %s%n", i++, consultant.getName());
         }
         System.out.print("Select consultant: ");
         int consultantIndex = Integer.parseInt(scanner.nextLine());
-        Consultant consultant = (Consultant) demoConsultants.values().toArray()[consultantIndex - 1];
+        
+        if (consultantIndex < 1 || consultantIndex > allConsultants.size()) {
+            System.out.println("Invalid consultant selection!");
+            return;
+        }
+        
+        Consultant consultant = (Consultant) allConsultants.toArray()[consultantIndex - 1];
 
         // Enter start time
         System.out.print("Enter start time (yyyy-MM-dd HH:mm): ");
@@ -437,41 +495,169 @@ public class BookingUI {
 
     private void managePaymentMethods(Client client) {
         System.out.println("\n=== Manage Payment Methods ===");
-        System.out.println("1. Add Payment Method");
-        System.out.println("2. View Payment Methods");
-        System.out.println("3. Remove Payment Method");
-        System.out.print("Choose option: ");
+        
+        while (true) {
+            System.out.println("\n1. Add Payment Method");
+            System.out.println("2. View My Payment Methods");
+            System.out.println("3. Remove Payment Method");
+            System.out.println("4. Back to Main Menu");
+            System.out.print("Choose option: ");
 
-        String choice = scanner.nextLine();
+            String choice = scanner.nextLine();
 
-        switch (choice) {
+            switch (choice) {
+                case "1":
+                    addPaymentMethod(client);
+                    break;
+                case "2":
+                    viewPaymentMethods(client);
+                    break;
+                case "3":
+                    removePaymentMethod(client);
+                    break;
+                case "4":
+                    return;
+                default:
+                    System.out.println("Invalid option! Please try again.");
+            }
+        }
+    }
+    
+    private void addPaymentMethod(Client client) {
+        System.out.println("\n--- Add Payment Method ---");
+        System.out.println("Available Payment Types:");
+        System.out.println("1. Credit Card");
+        System.out.println("2. Debit Card");
+        System.out.println("3. PayPal");
+        System.out.println("4. Bank Transfer");
+        System.out.print("Select payment type (1-4): ");
+        
+        String typeChoice = scanner.nextLine();
+        String type;
+        Map<String, String> details = new HashMap<>();
+        
+        switch (typeChoice) {
             case "1":
-                System.out.print("Enter payment method type (Credit/Debit/Paypal/BankTransfer): ");
-                String type = scanner.nextLine();
-                Map<String, String> details = new HashMap<>();
-                System.out.print("Enter primary detail: ");
-                details.put("primary", scanner.nextLine());
-
-                PaymentMethod method = clientService.addPaymentMethod(client, type, details);
-                System.out.println("Payment method added: " + method);
+                type = "Credit";
+                System.out.print("Enter card number (16 digits): ");
+                details.put("cardNumber", scanner.nextLine());
+                System.out.print("Enter expiry (MM/YY): ");
+                details.put("expiry", scanner.nextLine());
+                System.out.print("Enter CVV: ");
+                details.put("cvv", scanner.nextLine());
+                System.out.print("Enter cardholder name: ");
+                details.put("cardholderName", scanner.nextLine());
                 break;
+                
             case "2":
-                List<PaymentMethod> methods = clientService.getClientPaymentMethods(client);
-                for (PaymentMethod m : methods) {
-                    System.out.println(m);
-                }
+                type = "Debit";
+                System.out.print("Enter card number (16 digits): ");
+                details.put("cardNumber", scanner.nextLine());
+                System.out.print("Enter expiry (MM/YY): ");
+                details.put("expiry", scanner.nextLine());
+                System.out.print("Enter CVV: ");
+                details.put("cvv", scanner.nextLine());
+                System.out.print("Enter cardholder name: ");
+                details.put("cardholderName", scanner.nextLine());
                 break;
+                
             case "3":
-                // Simplified removal
-                System.out.println("Payment method removed.");
+                type = "Paypal";
+                System.out.print("Enter PayPal email: ");
+                details.put("email", scanner.nextLine());
                 break;
+                
+            case "4":
+                type = "BankTransfer";
+                System.out.print("Enter account number: ");
+                details.put("accountNumber", scanner.nextLine());
+                System.out.print("Enter routing number: ");
+                details.put("routingNumber", scanner.nextLine());
+                System.out.print("Enter bank name: ");
+                details.put("bankName", scanner.nextLine());
+                System.out.print("Enter account holder name: ");
+                details.put("accountHolderName", scanner.nextLine());
+                break;
+                
+            default:
+                System.out.println("Invalid payment type!");
+                return;
+        }
+        
+        try {
+            PaymentMethod method = clientService.addPaymentMethod(client, type, details);
+            if (method != null) {
+                System.out.println("\n✓ Payment method added successfully!");
+                System.out.println("Type: " + method);
+            } else {
+                System.out.println("\n✗ Failed to add payment method.");
+            }
+        } catch (Exception e) {
+            System.out.println("\n✗ Error: " + e.getMessage());
+        }
+    }
+    
+    private void viewPaymentMethods(Client client) {
+        System.out.println("\n--- Your Payment Methods ---");
+        List<PaymentMethod> methods = clientService.getClientPaymentMethods(client);
+        
+        if (methods.isEmpty()) {
+            System.out.println("No payment methods found. Please add a payment method first.");
+            return;
+        }
+        
+        System.out.println("You have " + methods.size() + " payment method(s):");
+        int i = 1;
+        for (PaymentMethod method : methods) {
+            System.out.printf("%d. %s%n", i++, method);
+        }
+    }
+    
+    private void removePaymentMethod(Client client) {
+        System.out.println("\n--- Remove Payment Method ---");
+        List<PaymentMethod> methods = clientService.getClientPaymentMethods(client);
+        
+        if (methods.isEmpty()) {
+            System.out.println("No payment methods to remove.");
+            return;
+        }
+        
+        System.out.println("Your payment methods:");
+        int i = 1;
+        for (PaymentMethod method : methods) {
+            System.out.printf("%d. %s%n", i++, method);
+        }
+        
+        System.out.print("\nEnter the number of the payment method to remove (1-" + methods.size() + ", or 0 to cancel): ");
+        String input = scanner.nextLine();
+        
+        try {
+            int index = Integer.parseInt(input) - 1;
+            
+            if (index == -1) {
+                System.out.println("Removal cancelled.");
+                return;
+            }
+            
+            if (index >= 0 && index < methods.size()) {
+                boolean success = clientService.removePaymentMethod(client, index);
+                if (success) {
+                    System.out.println("✓ Payment method removed successfully!");
+                } else {
+                    System.out.println("✗ Failed to remove payment method.");
+                }
+            } else {
+                System.out.println("Invalid selection! Please enter a number between 1 and " + methods.size() + ".");
+            }
+        } catch (NumberFormatException e) {
+            System.out.println("Invalid input! Please enter a number.");
         }
     }
 
     // Consultant operations
     private void viewConsultantBookings(Consultant consultant) {
         System.out.println("\n=== My Bookings ===");
-        List<Booking> bookings = consultantService.getConsultantBookings(consultant);
+        List<Booking> bookings = consultingService.getConsultantBookings(consultant);
 
         if (bookings.isEmpty()) {
             System.out.println("No bookings found.");
@@ -493,11 +679,11 @@ public class BookingUI {
         System.out.print("Enter booking ID: ");
         String bookingIdStr = scanner.nextLine();
 
-        List<Booking> bookings = consultantService.getConsultantBookings(consultant);
+        List<Booking> bookings = consultingService.getConsultantBookings(consultant);
         for (Booking booking : bookings) {
             if (booking.getBookingId().toString().equals(bookingIdStr)) {
                 try {
-                    consultantService.acceptBooking(consultant, booking);
+                    consultingService.acceptBooking(consultant, booking);
                     System.out.println("Booking accepted successfully!");
                     return;
                 } catch (Exception e) {
@@ -514,11 +700,11 @@ public class BookingUI {
         System.out.print("Enter booking ID: ");
         String bookingIdStr = scanner.nextLine();
 
-        List<Booking> bookings = consultantService.getConsultantBookings(consultant);
+        List<Booking> bookings = consultingService.getConsultantBookings(consultant);
         for (Booking booking : bookings) {
             if (booking.getBookingId().toString().equals(bookingIdStr)) {
                 try {
-                    consultantService.rejectBooking(consultant, booking);
+                    consultingService.rejectBooking(consultant, booking);
                     System.out.println("Booking rejected successfully!");
                     return;
                 } catch (Exception e) {
@@ -535,11 +721,11 @@ public class BookingUI {
         System.out.print("Enter booking ID: ");
         String bookingIdStr = scanner.nextLine();
 
-        List<Booking> bookings = consultantService.getConsultantBookings(consultant);
+        List<Booking> bookings = consultingService.getConsultantBookings(consultant);
         for (Booking booking : bookings) {
             if (booking.getBookingId().toString().equals(bookingIdStr)) {
                 try {
-                    consultantService.completeBooking(consultant, booking);
+                    consultingService.completeBooking(consultant, booking);
                     System.out.println("Booking completed successfully!");
                     return;
                 } catch (Exception e) {
@@ -561,7 +747,7 @@ public class BookingUI {
         LocalDateTime start = LocalDateTime.parse(startStr, formatter);
         LocalDateTime end = LocalDateTime.parse(endStr, formatter);
 
-        consultantService.manageAvailability(consultant,
+        consultingService.manageAvailability(consultant,
                 List.of(new TimeSlot(start, end)));
         System.out.println("Availability updated!");
     }
@@ -569,13 +755,17 @@ public class BookingUI {
     // Admin operations
     private void approveConsultant() {
         System.out.println("\n=== Approve Consultant ===");
-        System.out.print("Enter consultant ID: ");
-        String consultantId = scanner.nextLine();
-        Consultant consultant = demoConsultants.get(consultantId);
+        System.out.print("Enter consultant email: ");
+        String email = scanner.nextLine();
+        Consultant consultant = userService.getConsultantByEmail(email);
 
         if (consultant != null) {
-            adminService.approveConsultant(consultant);
-            System.out.println("Consultant approved!");
+            boolean success = userService.approveConsultant(email);
+            if (success) {
+                System.out.println("Consultant " + consultant.getName() + " has been approved and can now login!");
+            } else {
+                System.out.println("Failed to approve consultant.");
+            }
         } else {
             System.out.println("Consultant not found!");
         }
@@ -583,16 +773,50 @@ public class BookingUI {
 
     private void rejectConsultant() {
         System.out.println("\n=== Reject Consultant ===");
-        System.out.print("Enter consultant ID: ");
-        String consultantId = scanner.nextLine();
-        Consultant consultant = demoConsultants.get(consultantId);
+        System.out.print("Enter consultant email: ");
+        String email = scanner.nextLine();
+        Consultant consultant = userService.getConsultantByEmail(email);
 
         if (consultant != null) {
-            adminService.rejectConsultant(consultant);
-            System.out.println("Consultant rejected!");
+            boolean success = userService.rejectConsultant(email);
+            if (success) {
+                System.out.println("Consultant " + consultant.getName() + " has been rejected.");
+            } else {
+                System.out.println("Failed to reject consultant.");
+            }
         } else {
             System.out.println("Consultant not found!");
         }
+    }
+    
+    private void viewPendingConsultants() {
+        System.out.println("\n=== Pending Consultants ===");
+        
+        // Debug output
+        System.out.println("Total registered consultants: " + userService.getAllConsultants().size());
+        Collection<Consultant> allConsultants = userService.getAllConsultants();
+        for (Consultant c : allConsultants) {
+            System.out.println("  - " + c.getName() + " (" + c.getEmail() + ") - Approved: " + c.isApproved());
+        }
+        
+        Collection<Consultant> pendingConsultants = userService.getPendingConsultants();
+        
+        if (pendingConsultants.isEmpty()) {
+            System.out.println("No pending consultants waiting for approval.");
+            return;
+        }
+        
+        System.out.println("\nConsultants waiting for approval:");
+        int i = 1;
+        for (Consultant consultant : pendingConsultants) {
+            System.out.printf("%d. %s - %s (Registered: %s)%n", 
+                i++, 
+                consultant.getName(), 
+                consultant.getEmail(),
+                consultant.getUserID());
+        }
+        
+        System.out.println("\nTo approve or reject, use options 1 or 2 from the admin menu.");
     }
 
     private void setCancellationPolicy() {

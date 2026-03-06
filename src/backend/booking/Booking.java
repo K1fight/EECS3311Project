@@ -2,7 +2,7 @@ package backend.booking;
 
 import backend.user.Client;
 import backend.user.Consultant;
-import backend.service.ConsultingService;
+import backend.core.ConsultingService;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
