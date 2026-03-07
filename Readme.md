@@ -218,20 +218,16 @@ A quick demo path:
 ---
 
 ## 11. Team contribution (fill in)
-- Member A:  Bin Tang
+Member A:  Bin Tang
+- Responsible for backend
+- github name: K1fight
 
-Responsible for backend
 
-github name: K1fight
+Member B:  Zehao Liu
+- Responsible for correction of backend and frontend and documentation
+- github name: liu0205-mario
 
-- Member B:  Zehao Liu
 
-Responsible for correction of backend and frontend and documentation
-
-github name: liu0205-mario
-
-- Member C:  Haiyun He
-
-Responsible for UML diagrams
-
-github name: 3canary
+Member C:  Haiyun He
+- Responsible for UML diagrams and additions to the backend
+- github name: 3canary
