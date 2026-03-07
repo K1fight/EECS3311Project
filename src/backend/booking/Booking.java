@@ -1,10 +1,16 @@
 package backend.booking;
 
+import backend.notification.BookingObserver;
+import backend.notification.NotificationService;
 import backend.user.Client;
 import backend.user.Consultant;
 import backend.core.ConsultingService;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+
+import static backend.booking.BookingStatus.*;
 
 // State pattern: Booking maintains a State object, delegating state behavior
 public class Booking {
@@ -15,6 +21,9 @@ public class Booking {
     private LocalDateTime startTime;
     private LocalDateTime endTime;
     private BookingState currentState;
+    private BookingStatus status;
+
+    private List<BookingObserver> observers = new ArrayList<>();
 
     public Booking(Client client, Consultant consultant, ConsultingService service, LocalDateTime startTime) {
         this.bookingId = UUID.randomUUID();
@@ -23,12 +32,26 @@ public class Booking {
         this.service = service;
         this.startTime = startTime;
         this.endTime = startTime.plusMinutes(service.getDurationMinutes());
-        this.currentState = new RequestedState(); // Initial state
+    }
+
+    public void addObserver(NotificationService observer) {
+        observers.add(observer);
+    }
+
+    public void removeObserver(NotificationService observer) {
+        observers.remove(observer);
+    }
+
+    public void notifyObservers() {
+        for (BookingObserver observer : observers) {
+            observer.update(this);
+        }
     }
 
     public void setState(BookingState state) {
         this.currentState = state;
     }
+    public void setStatus(BookingStatus status) { this.status = status; }
 
     // Delegate processing to the current state
     public void confirm() {
@@ -58,4 +81,5 @@ public class Booking {
     public BookingState getCurrentState() { return currentState; }
     public LocalDateTime getStartTime() { return startTime; }
     public ConsultingService getService() { return service; }
+    public BookingStatus getStatus() { return status; }
 }

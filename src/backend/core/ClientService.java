@@ -1,15 +1,18 @@
 package backend.core;
 
+import backend.booking.RequestedState;
+import backend.notification.NotificationService;
 import backend.user.Client;
 import backend.user.Consultant;
 import backend.booking.Booking;
 import backend.payment.PaymentMethod;
 import backend.payment.PaymentMethodFactory;
-import backend.notification.NotificationService;
 import backend.policy.CancellationPolicy;
 import backend.policy.DefaultCancellationPolicy;
 import java.time.LocalDateTime;
 import java.util.*;
+
+import static backend.booking.BookingStatus.*;
 
 // Client service layer, implementing client use cases
 public class ClientService {
@@ -19,6 +22,8 @@ public class ClientService {
     private Map<Client, List<Map<String, Object>>> clientPaymentMethods = new HashMap<>();
     private BookingService bookingService;
     private ConsultingService consultingService;
+
+    private NotificationService notificationService = new NotificationService();
 
     public ClientService() {
         this.bookingService = new BookingService();
@@ -42,15 +47,17 @@ public class ClientService {
     public Booking requestBooking(Client client, ConsultingService service, Consultant consultant, LocalDateTime startTime) {
         // Check consultant availability (omitted)
         Booking booking = new Booking(client, consultant, service, startTime);
+        booking.addObserver(notificationService);
+        booking.setState(new RequestedState()); // Initial state
+        booking.setStatus(Requested);
+        booking.notifyObservers();
         clientBookings.computeIfAbsent(client, k -> new ArrayList<>()).add(booking);
-        
+
         // Also add to consultant's bookings
         if (consultingService != null) {
             consultingService.addBookingToConsultant(booking);
         }
-        
-        // Notify consultant
-        NotificationService.sendEmail(consultant, "New booking request from " + client.getName());
+
         return booking;
     }
 
@@ -74,16 +81,16 @@ public class ClientService {
 
     public PaymentMethod addPaymentMethod(Client client, String type, Map<String, String> details) {
         PaymentMethod method = PaymentMethodFactory.createPaymentMethod(type, details);
-        
+
         // Store both the method type and its details
         Map<String, Object> paymentInfo = new HashMap<>();
         paymentInfo.put("method", method);
         paymentInfo.put("details", new HashMap<>(details));
-        
+
         clientPaymentMethods.computeIfAbsent(client, k -> new ArrayList<>()).add(paymentInfo);
         return method;
     }
-    
+
     /**
      * Get payment method details by index
      * @param client The client
@@ -97,7 +104,7 @@ public class ClientService {
         }
         return methods.get(methodIndex);
     }
-    
+
     /**
      * Remove a specific payment method for a client
      * @param client The client
@@ -109,17 +116,17 @@ public class ClientService {
         if (methods == null || methods.isEmpty()) {
             return false;
         }
-        
+
         if (methodIndex >= 0 && methodIndex < methods.size()) {
             methods.remove(methodIndex);
             System.out.println("Payment method removed successfully.");
             return true;
         }
-        
+
         System.out.println("Invalid payment method index.");
         return false;
     }
-    
+
     /**
      * Remove all payment methods for a client
      * @param client The client

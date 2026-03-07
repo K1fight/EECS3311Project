@@ -3,7 +3,7 @@ package backend.booking;
 public enum BookingStatus {
     Requested,
     Confirmed,
-    Accepted,
+    Paid,
     Rejected,
     Cancelled,
     Completed
