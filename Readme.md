@@ -94,6 +94,7 @@ A typical scenario works like this:
 
 ### 6.1 State Pattern (Booking lifecycle)
 **Why**
+
 A booking behaves differently depending on its state.  
 If we used only an enum and many `if/switch` statements, the booking logic would become long and error-prone.
 
@@ -122,6 +123,7 @@ If we used only an enum and many `if/switch` statements, the booking logic would
 
 ### 6.2 Factory Method (Payment creation)
 **Why**
+
 We support multiple payment methods. We do not want the service layer to directly depend on concrete classes like `new CreditCardPayment()` everywhere.
 
 **How it works in our code**
@@ -146,6 +148,7 @@ We support multiple payment methods. We do not want the service layer to directl
 
 ### 6.3 Proxy Pattern (Access control)
 **Why**
+
 Role checking and login checking can become duplicated if written in every service method.  
 We centralize access checks in one place.
 
@@ -163,6 +166,7 @@ We centralize access checks in one place.
 
 ### 6.4 Policy / Strategy-style design (Cancellation / Refund / Pricing rules)
 **Why**
+
 Business rules change. We do not want to hard-code rules inside booking lifecycle logic.
 
 **How it works in our code**
@@ -215,13 +219,19 @@ A quick demo path:
 
 ## 11. Team contribution (fill in)
 - Member A:  Bin Tang
+
 Responsible for backend
+
 github name: K1fight
 
 - Member B:  Zehao Liu
+
 Responsible for correction of backend and frontend and documentation
+
 github name: liu0205-mario
 
-- Member C:  Haiyun
-Responsible for diagrams
+- Member C:  Haiyun He
+
+Responsible for UML diagrams
+
 github name: 3canary
