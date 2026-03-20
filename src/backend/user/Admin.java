@@ -6,12 +6,18 @@ public class Admin extends User {
     }
 
     public void approveConsultant() {
+        System.out.println("Approving consultant...");
+        // Implementation delegated to AdminService
     }
 
     public void rejectConsultant() {
+        System.out.println("Rejecting consultant...");
+        // Implementation delegated to AdminService
     }
 
     public void definePolicies() {
+        System.out.println("Defining system policies...");
+        // Implementation delegated to AdminService
     }
 
     @Override

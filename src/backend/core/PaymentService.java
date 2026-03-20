@@ -16,6 +16,20 @@ public class PaymentService {
     private PaymentHistory globalPaymentHistory = new PaymentHistory(); // Or independent for each client
 
     public boolean processPayment(Booking booking, PaymentMethod method, Map<String, String> details) {
+        return processPayment(booking, method, details, null, null);
+    }
+
+    /**
+     * Process payment with optional client history tracking
+     * @param booking The booking to pay for
+     * @param method Payment method
+     * @param details Payment details
+     * @param client The client making the payment (optional, for history tracking)
+     * @param clientService The client service for recording history (optional)
+     * @return true if payment successful
+     */
+    public boolean processPayment(Booking booking, PaymentMethod method, Map<String, String> details,
+                                   backend.user.Client client, ClientService clientService) {
         if (!validatePaymentDetails(method, details)) {
             System.out.println("Payment validation failed.");
             return false;
@@ -55,6 +69,11 @@ public class PaymentService {
 
         // 7. Save transaction record (e.g., store in global history, or associate with client)
         globalPaymentHistory.addTransaction(transaction);
+        
+        // 8. If client and clientService provided, also add to client's personal history
+        if (client != null && clientService != null) {
+            clientService.addPaymentToHistory(client, transaction);
+        }
 
         return success;
     }

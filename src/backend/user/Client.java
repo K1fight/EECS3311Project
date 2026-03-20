@@ -25,7 +25,8 @@ public class Client extends User {
 
     }
     public void viewPaymentHistory(){
-
+        System.out.println("Viewing payment history...");
+        // Implementation delegated to ClientService
     }
     @Override
     public AccountType getAccountType() {

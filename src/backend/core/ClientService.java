@@ -7,6 +7,7 @@ import backend.user.Consultant;
 import backend.booking.Booking;
 import backend.payment.PaymentMethod;
 import backend.payment.PaymentMethodFactory;
+import backend.payment.PaymentTransaction;
 import backend.policy.CancellationPolicy;
 import backend.policy.DefaultCancellationPolicy;
 import java.time.LocalDateTime;
@@ -20,6 +21,8 @@ public class ClientService {
     private Map<Client, List<Booking>> clientBookings = new HashMap<>();
     // Store payment method details: type -> list of (type, details)
     private Map<Client, List<Map<String, Object>>> clientPaymentMethods = new HashMap<>();
+    // Store payment history per client
+    private Map<Client, List<PaymentTransaction>> clientPaymentHistory = new HashMap<>();
     private BookingService bookingService;
     private ConsultingService consultingService;
 
@@ -134,6 +137,24 @@ public class ClientService {
     public void removeAllPaymentMethods(Client client) {
         clientPaymentMethods.remove(client);
         System.out.println("All payment methods removed.");
+    }
+
+    /**
+     * Add a payment transaction to client's payment history
+     * @param client The client
+     * @param transaction The payment transaction to add
+     */
+    public void addPaymentToHistory(Client client, PaymentTransaction transaction) {
+        clientPaymentHistory.computeIfAbsent(client, k -> new ArrayList<>()).add(transaction);
+    }
+
+    /**
+     * View payment history for a client
+     * @param client The client
+     * @return List of payment transactions
+     */
+    public List<PaymentTransaction> viewPaymentHistory(Client client) {
+        return clientPaymentHistory.getOrDefault(client, Collections.emptyList());
     }
 
     // Other methods...

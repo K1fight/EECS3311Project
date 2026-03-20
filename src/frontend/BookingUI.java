@@ -2,6 +2,7 @@ package frontend;
 
 import backend.booking.Booking;
 import backend.core.*;
+import backend.database.*;
 import backend.payment.PaymentMethod;
 import backend.core.ConsultingService;
 import backend.service.ServiceCategory;
@@ -39,6 +40,20 @@ public class BookingUI {
     }
 
     public void initialize() {
+        // Initialize database
+        try {
+            DatabaseConnection db = DatabaseConnection.getInstance();
+            db.connect();
+            
+            DatabaseInitializer initializer = new DatabaseInitializer();
+            initializer.initialize();
+            
+            System.out.println("Database initialized successfully.\n");
+        } catch (Exception e) {
+            System.err.println("Warning: Database initialization failed: " + e.getMessage());
+            System.out.println("Running in memory-only mode (data will not persist).\n");
+        }
+        
         // Initialize services
         bookingService = new BookingService();
         consultingService = new ConsultingService();
@@ -254,7 +269,9 @@ public class BookingUI {
         System.out.println("4. Cancel Booking");
         System.out.println("5. Make Payment");
         System.out.println("6. Manage Payment Methods");
-        System.out.println("7. Logout");
+        System.out.println("7. View Payment History");
+        System.out.println("8. AI Customer Assistant");
+        System.out.println("9. Logout");
         System.out.print("Choose option: ");
 
         String choice = scanner.nextLine();
@@ -279,6 +296,12 @@ public class BookingUI {
                 managePaymentMethods(client);
                 break;
             case "7":
+                viewPaymentHistory(client);
+                break;
+            case "8":
+                launchAIChatbot(client);
+                break;
+            case "9":
                 logout();
                 break;
             default:
@@ -353,9 +376,10 @@ public class BookingUI {
         System.out.println("1. Approve Consultant");
         System.out.println("2. Reject Consultant");
         System.out.println("3. View Pending Consultants");
-        System.out.println("4. Set Cancellation Policy");
-        System.out.println("5. Set Pricing Strategy");
-        System.out.println("6. Logout");
+        System.out.println("4. View System Status");
+        System.out.println("5. Set Cancellation Policy");
+        System.out.println("6. Set Pricing Strategy");
+        System.out.println("7. Logout");
         System.out.print("Choose option: ");
 
         String choice = scanner.nextLine();
@@ -371,12 +395,15 @@ public class BookingUI {
                 viewPendingConsultants();
                 break;
             case "4":
-                setCancellationPolicy();
+                viewSystemStatus();
                 break;
             case "5":
-                setPricingStrategy();
+                setCancellationPolicy();
                 break;
             case "6":
+                setPricingStrategy();
+                break;
+            case "7":
                 logout();
                 break;
             default:
@@ -752,6 +779,50 @@ public class BookingUI {
         }
     }
 
+    private void viewPaymentHistory(Client client) {
+        System.out.println("\n=== Payment History ===");
+        List<backend.payment.PaymentTransaction> transactions = clientService.viewPaymentHistory(client);
+        
+        if (transactions.isEmpty()) {
+            System.out.println("No payment history found.");
+            return;
+        }
+        
+        System.out.println("Your payment transactions:");
+        int i = 1;
+        for (backend.payment.PaymentTransaction transaction : transactions) {
+            System.out.printf("%d. Transaction ID: %s | Amount: $%.2f | Method: %s | Status: %s | Date: %s%n",
+                    i++,
+                    transaction.getTransactionId(),
+                    transaction.getAmount(),
+                    transaction.getPaymentMethod(),
+                    transaction.getStatus(),
+                    transaction.getTimestamp().format(formatter));
+        }
+    }
+
+    private void launchAIChatbot(Client client) {
+        System.out.println("\n===========================================");
+        System.out.println("   Welcome to AI Customer Assistant");
+        System.out.println("===========================================");
+        
+        AIChatbotService chatbot = new AIChatbotService();
+        chatbot.displayHelp();
+        
+        while (true) {
+            System.out.print("You: ");
+            String userInput = scanner.nextLine();
+            
+            if (userInput.equalsIgnoreCase("quit") || userInput.equalsIgnoreCase("exit")) {
+                System.out.println("Thank you for using AI Customer Assistant. Goodbye!");
+                break;
+            }
+            
+            String response = chatbot.getResponse(userInput);
+            System.out.println("AI Assistant: " + response);
+        }
+    }
+
     // Consultant operations
     private void viewConsultantBookings(Consultant consultant) {
         System.out.println("\n=== My Bookings ===");
@@ -915,6 +986,35 @@ public class BookingUI {
         }
         
         System.out.println("\nTo approve or reject, use options 1 or 2 from the admin menu.");
+    }
+
+    private void viewSystemStatus() {
+        System.out.println("\n===========================================");
+        System.out.println("          SYSTEM STATUS DASHBOARD");
+        System.out.println("===========================================");
+        
+        Map<String, Object> status = adminService.getSystemStatus();
+        
+        System.out.println("\n--- User Statistics ---");
+        System.out.printf("Total Users: %d%n", status.get("total_users"));
+        System.out.printf("Total Clients: %d%n", status.get("total_clients"));
+        System.out.printf("Total Consultants: %d%n", status.get("total_consultants"));
+        System.out.printf("  - Approved: %d%n", status.get("approved_consultants"));
+        System.out.printf("  - Pending Approval: %d%n", status.get("pending_consultants"));
+        
+        System.out.println("\n--- Service Information ---");
+        System.out.printf("Total Services Available: %d%n", status.get("total_services"));
+        
+        System.out.println("\n--- Active Policies ---");
+        System.out.printf("Cancellation Policy: %s%n", status.get("cancellation_policy"));
+        System.out.printf("Pricing Strategy: %s%n", status.get("pricing_strategy"));
+        
+        System.out.println("\n--- System Health ---");
+        System.out.println("Database Connection: " + 
+            (backend.database.DatabaseConnection.getInstance().isConnected() ? "✓ Connected" : "✗ Disconnected"));
+        System.out.println("System Status: ✓ Operational");
+        
+        System.out.println("\n===========================================");
     }
 
     private void setCancellationPolicy() {

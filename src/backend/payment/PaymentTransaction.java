@@ -35,4 +35,8 @@ public class PaymentTransaction {
 
     public UUID getTransactionId() { return transactionId; }
     public PaymentStatus getStatus() { return status; }
+    public double getAmount() { return amount; }
+    public PaymentMethod getPaymentMethod() { return paymentMethod; }
+    public String getPaymentDetailMasked() { return paymentDetailMasked; }
+    public LocalDateTime getTimestamp() { return timestamp; }
 }
