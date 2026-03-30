@@ -35,7 +35,7 @@ public class UserDAO extends BaseDAO {
                 user.getEmail(),
                 user.getPassword(),
                 user.getAccountType().toString(),
-                (user instanceof Consultant consultant) ? (consultant.isApproved() ? 1 : 0) : 1
+                (user instanceof Consultant consultant) ? consultant.isApproved() : true
             );
             return rows > 0;
         } catch (SQLException e) {
@@ -158,7 +158,7 @@ public class UserDAO extends BaseDAO {
         String sql = "UPDATE users SET is_approved = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?";
         
         try {
-            int rows = executeUpdate(sql, approved ? 1 : 0, userId);
+            int rows = executeUpdate(sql, approved, userId);
             return rows > 0;
         } catch (SQLException e) {
             System.err.println("Error updating approval status: " + e.getMessage());
@@ -195,7 +195,7 @@ public class UserDAO extends BaseDAO {
         String email = rs.getString("email");
         String password = rs.getString("password");
         AccountType accountType = AccountType.valueOf(rs.getString("account_type"));
-        boolean isApproved = rs.getInt("is_approved") == 1;
+        boolean isApproved = rs.getBoolean("is_approved");
         
         return switch (accountType) {
             case Admin -> new backend.user.Admin(name, email, password);

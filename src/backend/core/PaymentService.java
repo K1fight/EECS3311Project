@@ -83,15 +83,15 @@ public class PaymentService {
      */
     private boolean validatePaymentDetails(PaymentMethod method, Map<String, String> details) {
         switch (method) {
-            case Credit:
-            case Debit:
+            case CreditCard:
+            case DebitCard:
                 String cardNum = details.get("cardNumber");
                 String expiry = details.get("expiry");
                 String cvv = details.get("cvv");
                 return cardNum != null && cardNum.matches("\\d{16}") &&
                         expiry != null && expiry.matches("(0[1-9]|1[0-2])/\\d{2}") &&
                         cvv != null && cvv.matches("\\d{3,4}");
-            case Paypal:
+            case PayPal:
                 String email = details.get("email");
                 return email != null && email.matches("^[A-Za-z0-9+_.-]+@(.+)$");
             case BankTransfer:
@@ -112,15 +112,15 @@ public class PaymentService {
         PaymentFactory factory = null;
 
         switch (method) {
-            case Credit:
+            case CreditCard:
                 primaryDetail = details.get("cardNumber");
                 factory = new CreditCardPaymentFactory();
                 break;
-            case Debit:
+            case DebitCard:
                 primaryDetail = details.get("cardNumber");
                 factory = new DebitCardPaymentFactory();
                 break;
-            case Paypal:
+            case PayPal:
                 primaryDetail = details.get("email");
                 factory = new PaypalPaymentFactory();
                 break;
@@ -141,11 +141,11 @@ public class PaymentService {
      */
     private String maskDetail(PaymentMethod method, Map<String, String> details) {
         switch (method) {
-            case Credit:
-            case Debit:
+            case CreditCard:
+            case DebitCard:
                 String card = details.get("cardNumber");
                 return "**** **** **** " + card.substring(card.length() - 4);
-            case Paypal:
+            case PayPal:
                 String email = details.get("email");
                 return email.replaceAll("(?<=.{3}).(?=[^@]*@)", "*");
             case BankTransfer:

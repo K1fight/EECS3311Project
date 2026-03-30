@@ -1,5 +1,7 @@
 package backend.database;
 
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -16,14 +18,35 @@ public class DatabaseConnection {
     private String username;
     private String password;
     
-    // Database configuration
-    private static final String DEFAULT_URL = "jdbc:sqlite:consulting_booking.db";
-    private static final String SQLITE_DRIVER = "org.sqlite.JDBC";
+    // Database configuration loaded from properties file
+    private Properties dbProperties;
     
     private DatabaseConnection() {
-        this.url = DEFAULT_URL;
-        this.username = "";
-        this.password = "";
+        this.dbProperties = new Properties();
+        loadDatabaseProperties();
+        
+        this.url = dbProperties.getProperty("db.url");
+        this.username = dbProperties.getProperty("db.username");
+        this.password = dbProperties.getProperty("db.password");
+    }
+    
+    /**
+     * Load database properties from database.properties file
+     */
+    private void loadDatabaseProperties() {
+        try (FileInputStream input = new FileInputStream("database.properties")) {
+            dbProperties.load(input);
+            System.out.println("Database properties loaded successfully.");
+            System.out.println("Using database: " + dbProperties.getProperty("db.type"));
+        } catch (IOException e) {
+            System.err.println("Error loading database.properties: " + e.getMessage());
+            // Set default values if properties file not found
+            dbProperties.setProperty("db.type", "postgresql");
+            dbProperties.setProperty("db.url", "jdbc:postgresql://localhost:5432/consulting_booking");
+            dbProperties.setProperty("db.username", "postgres");
+            dbProperties.setProperty("db.password", "postgres");
+            System.out.println("Using default database configuration.");
+        }
     }
     
     /**
@@ -47,17 +70,18 @@ public class DatabaseConnection {
         }
         
         try {
-            // Load SQLite JDBC driver
-            Class.forName(SQLITE_DRIVER);
+            // Load PostgreSQL JDBC driver
+            Class.forName("org.postgresql.Driver");
             
             // Establish connection
             Properties props = new Properties();
-            props.setProperty("PRAGMA foreign_keys", "true"); // Enable foreign key support
+            props.setProperty("user", username);
+            props.setProperty("password", password);
             connection = DriverManager.getConnection(url, props);
             
             System.out.println("Connected to database successfully.");
         } catch (ClassNotFoundException e) {
-            throw new SQLException("SQLite JDBC driver not found.", e);
+            throw new SQLException("PostgreSQL JDBC driver not found.", e);
         }
     }
     
@@ -78,19 +102,13 @@ public class DatabaseConnection {
         this.password = password;
         
         try {
-            // Load appropriate JDBC driver based on URL
-            if (url.contains("sqlite")) {
-                Class.forName(SQLITE_DRIVER);
-                Properties props = new Properties();
-                props.setProperty("PRAGMA foreign_keys", "true");
-                connection = DriverManager.getConnection(url, props);
-            } else if (url.contains("mysql")) {
-                Class.forName("com.mysql.cj.jdbc.Driver");
-                connection = DriverManager.getConnection(url, username, password);
-            } else if (url.contains("postgresql")) {
-                Class.forName("org.postgresql.Driver");
-                connection = DriverManager.getConnection(url, username, password);
-            }
+            // Load PostgreSQL JDBC driver
+            Class.forName("org.postgresql.Driver");
+            
+            Properties props = new Properties();
+            props.setProperty("user", username);
+            props.setProperty("password", password);
+            connection = DriverManager.getConnection(url, props);
             
             System.out.println("Connected to database: " + url);
         } catch (ClassNotFoundException e) {

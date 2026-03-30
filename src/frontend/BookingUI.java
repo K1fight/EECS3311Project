@@ -1120,14 +1120,14 @@ public class BookingUI {
      */
     private String getMaskedPaymentInfo(PaymentMethod method, Map<String, String> details) {
         switch (method) {
-            case Credit:
-            case Debit:
+            case CreditCard:
+            case DebitCard:
                 String cardNum = details.get("cardNumber");
                 if (cardNum != null && cardNum.length() >= 4) {
                     return "**** **** **** " + cardNum.substring(cardNum.length() - 4);
                 }
                 return "Card";
-            case Paypal:
+            case PayPal:
                 String email = details.get("email");
                 return email != null ? email : "PayPal";
             case BankTransfer:
@@ -1152,8 +1152,8 @@ public class BookingUI {
         System.out.println("\n--- Enter Payment Details for " + method + " ---");
         
         switch (method) {
-            case Credit:
-            case Debit:
+            case CreditCard:
+            case DebitCard:
                 System.out.print("Enter card number (16 digits): ");
                 details.put("cardNumber", scanner.nextLine());
                 System.out.print("Enter expiry (MM/YY): ");
@@ -1162,7 +1162,7 @@ public class BookingUI {
                 details.put("cvv", scanner.nextLine());
                 break;
                 
-            case Paypal:
+            case PayPal:
                 System.out.print("Enter PayPal email: ");
                 details.put("email", scanner.nextLine());
                 break;

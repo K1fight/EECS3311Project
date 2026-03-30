@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # Single Java API Server - Simple, no nginx, no multi-threading
+  app:
+    image: eclipse-temurin:17-jre-alpine
+    container_name: eecs3311-app
+    working_dir: /app
+    command: >
+      sh -c "mkdir -p lib build/classes && \
+             wget -q -O lib/postgresql-42.6.0.jar https://jdbc.postgresql.org/download/postgresql-42.6.0.jar 2>/dev/null || true && \
+             javac -d build/classes -cp 'src:lib/*' src/backend/**/*.java && \
+             java -cp 'build/classes:lib/*' backend.api.SimpleApiServer"
+    volumes:
+      - .:/app
+    networks:
+      - eecs-network
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVER_PORT=8080
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # PostgreSQL Database
+  db:
+    image: postgres:15
+    container_name: eecs3311-db
+    environment:
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: mydb
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser -d mydb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - eecs-network
+
+networks:
+  eecs-network:
+    driver: bridge
+
+volumes:
+  pgdata:

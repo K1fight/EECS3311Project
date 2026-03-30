@@ -38,5 +38,6 @@ public class PaymentTransaction {
     public double getAmount() { return amount; }
     public PaymentMethod getPaymentMethod() { return paymentMethod; }
     public String getPaymentDetailMasked() { return paymentDetailMasked; }
+    public String getMaskedDetails() { return paymentDetailMasked; }
     public LocalDateTime getTimestamp() { return timestamp; }
 }

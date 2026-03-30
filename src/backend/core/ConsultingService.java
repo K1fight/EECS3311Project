@@ -40,6 +40,14 @@ public class ConsultingService {
     public ServiceCategory getCategory() { return category; }
     public UUID getServiceId() { return serviceId; }
     
+    // ========== Consulting Service Setters ==========
+    public void setBasePrice(double basePrice) { this.basePrice = basePrice; }
+    public void setDurationMinutes(int durationMinutes) { this.durationMinutes = durationMinutes; }
+    public void setName(String name) { this.name = name; }
+    public void setDescription(String description) { this.description = description; }
+    public void setCategory(ServiceCategory category) { this.category = category; }
+    public void setServiceId(UUID serviceId) { this.serviceId = serviceId; }
+    
     // ========== Consultant Management Methods ==========
     
     /**

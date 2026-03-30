@@ -1,233 +1,427 @@
-# EECS 3311 Project (Phase 1)
+# EECS 3311 Project (Phase 1 & Phase 2)
 ## Service Booking & Consulting Platform
 
-## Github URL
+## GitHub URL
 https://github.com/K1fight/EECS3311Project.git
 
-## 1. What this project is
-This project is a **service booking and consulting platform**.  
-A **Client** can request a booking for a consulting service. A **Consultant** can accept or reject the request, and later complete the booking. The system also supports **simulated payments**, **cancellation rules**, and **basic access control**.
+---
 
-Phase 1 focuses on:
-- clean backend structure (OOP design),
-- using design patterns in a meaningful way,
-- and providing a minimal UI to demonstrate the workflow.
+## 1. What This Project Is
+
+This is a **complete service booking and consulting platform** that connects clients with consultants. The system manages:
+
+- Consulting services catalog
+- Booking lifecycle (request → confirm → pay → complete)
+- Payment processing (simulated)
+- User authentication and authorization
+- Admin oversight
+- **AI Customer Assistant Chatbot** (Phase 2)
+
+### Actors
+| Actor | Capabilities |
+|-------|-------------|
+| **Client** | Browse services, request bookings, cancel, pay, view history |
+| **Consultant** | Accept/reject bookings, complete sessions, manage availability |
+| **Admin** | Approve consultants, define system policies, manage users |
 
 ---
 
-## 2. What we can do (Phase 1 features)
+## 2. Features
 
-### Client
-- Browse services
-- Request a booking
-- Cancel a booking
-- Make a payment (simulated)
-- View booking/payment history (in-memory demo level)
+### Phase 1 Features ✅
+- **Client**
+  - Browse consulting services
+  - Request a booking
+  - Cancel a booking (with policy enforcement)
+  - Process payment (simulated)
+  - View booking/payment history
 
-### Consultant
-- Accept a booking
-- Reject a booking
-- Complete a booking
-- Manage availability (simplified/in-memory)
+- **Consultant**
+  - Accept or reject booking requests
+  - Complete bookings
+  - Manage availability
 
-### Admin
-- Manage system rules (policy framework exists; some policy logic is minimal/placeholder in Phase 1 and designed to be extended)
+- **Admin**
+  - Approve consultant registrations
+  - Define system policies (cancellation, pricing)
 
----
-
-## 3. How to run
-### 3.1 Run the CLI frontend
-Our Phase 1 frontend is a **terminal UI**.
-
-**Entry file**
-- `BookingUI.java`
-
-**Steps**
-1. Open the project in an IDE (IntelliJ / Eclipse / VSCode).
-2. Run `BookingUI.main()`.
-3. Use the menu to simulate an end-to-end flow:
-   - Client: browse services → request booking  
-   - Consultant: accept booking  
-   - Client: pay  
-   - Consultant: complete booking  
-
-> This UI is intentionally simple. It collects input and calls backend services. All business logic is in the backend.
+### Phase 2 Features ✅
+- **Complete Web Frontend** (HTML/CSS/JavaScript)
+- **Docker Deployment** (4 containers: backend, frontend, database, builder)
+- **AI Customer Assistant Chatbot** (rule-based, privacy-safe)
 
 ---
 
-## 4. Project structure (where things are)
-backend/
-booking/        # Booking domain + lifecycle (State Pattern)
-core/           # Service layer: coordinates use cases
-payment/        # Payment creation/processing + transaction history (Factory Method)
-policy/         # Cancellation/refund/pricing rules (policy/strategy-style)
-user/           # Users + access control (Proxy)
-notification/   # Simulated notification sending
-service/        # Consulting service entities/catalog
-frontend/
-BookingUI.java  # CLI UI to drive the workflows
-### Why we separated packages like this
-We did this to keep responsibilities clear:
-- `booking` focuses on the booking lifecycle rules
-- `core` focuses on use case flow (the steps of each user action)
-- `payment` focuses on payment creation and recording transactions
-- `policy` focuses on business rules that may change (refund/cancellation/pricing)
-- `user` focuses on roles and access control logic
-- `notification` focuses on messaging (simulated)
-- `service` holds the consulting service definitions
+## 3. Design Patterns Used
 
-This keeps the code easier to understand and easier to extend.
+| Pattern | Location | Purpose |
+|---------|----------|---------|
+| **State Pattern** | `backend/booking/` | Booking lifecycle management (Requested → Confirmed → Paid → Completed) |
+| **Factory Method** | `backend/payment/` | Payment method creation (CreditCard, PayPal, BankTransfer, etc.) |
+| **Proxy Pattern** | `backend/user/UserProxy.java` | Access control and role checking |
+| **Strategy/Policy** | `backend/policy/` | Cancellation rules, pricing strategies |
+| **Observer Pattern** | `backend/notification/` | Booking status notifications |
 
 ---
 
-## 5. Core workflow (end-to-end scenario)
-A typical scenario works like this:
-1. **Client** requests a booking → booking starts in **Requested** state
-2. **Consultant** accepts or rejects
-3. If accepted, **Client** pays → booking moves to **Paid**
-4. **Consultant** completes the booking → booking moves to **Completed**
-5. Client may cancel depending on cancellation policy and booking state
+## 4. How to Run
+
+### Option A: Docker (Recommended - Phase 2)
+
+**Single command deployment:**
+
+```bash
+docker-compose up --build
+```
+
+This starts 4 containers:
+- `eecs3311-db` - PostgreSQL database (port 5434)
+- `eecs3311-builder` - Java build container
+- `eecs3311-app` - Backend API (port 8080)
+- `eecs3311-frontend` - Web UI (port 3000)
+
+**Access the application:**
+- Frontend: http://localhost:3000
+- API: http://localhost:8080/api
+- Health check: http://localhost:8080/api/health
+
+**Stop the application:**
+```bash
+docker-compose down
+```
+
+### Option B: Local Development (Phase 1)
+
+**Prerequisites:**
+- Java 17+
+- PostgreSQL (optional, runs in demo mode without DB)
+
+**Steps:**
+1. Compile the project:
+```bash
+mkdir -p build/classes lib
+wget -O lib/postgresql-42.6.0.jar https://jdbc.postgresql.org/download/postgresql-42.6.0.jar
+javac -d build/classes -cp "src:lib/*" src/backend/**/*.java
+```
+
+2. Run the API server:
+```bash
+java -cp "build/classes:lib/*" backend.Main
+```
+
+3. Open frontend in browser:
+```bash
+# Open frontend/index.html in your browser
+# Or serve with a local web server
+```
 
 ---
 
-## 6. Design patterns used (where + why)
+## 5. Project Structure
 
-### 6.1 State Pattern (Booking lifecycle)
-**Why**
+```
+EECS3311Project/
+├── src/
+│   ├── backend/
+│   │   ├── api/              # REST API handlers
+│   │   ├── booking/          # Booking domain + State pattern
+│   │   ├── core/             # Service layer orchestration
+│   │   ├── database/         # DAOs + DB connection
+│   │   ├── notification/     # Observer pattern
+│   │   ├── payment/          # Payment + Factory pattern
+│   │   ├── policy/           # Strategy/Policy patterns
+│   │   ├── service/          # Service entities
+│   │   └── user/             # Users + Proxy pattern
+│   └── frontend/
+│       ├── index.html        # Main UI
+│       ├── app.js            # Frontend logic
+│       └── Dockerfile        # Frontend container
+├── diagrams/                 # UML diagrams
+├── docker-compose.yml        # Docker orchestration
+├── nginx.conf                # Frontend server config
+├── database.properties       # DB configuration
+├── .env.example              # Environment template
+└── README.md                 # This file
+```
 
-A booking behaves differently depending on its state.  
-If we used only an enum and many `if/switch` statements, the booking logic would become long and error-prone.
+### Package Responsibilities
 
-**How it works in our code**
-- `Booking` holds a `BookingState currentState`
-- Booking actions delegate to the state object
-- Each state class decides whether an action is allowed, and performs state transitions
-
-**Main files**
-- `backend/booking/Booking.java`
-- `backend/booking/BookingState.java`
-- Concrete states:
-  - `RequestedState.java`
-  - `ConfirmedState.java`
-  - `PendingPaymentState.java`
-  - `PaidState.java`
-  - `CancelledState.java`
-  - `RejectedState.java`
-  - `CompletedState.java`
-
-**What you should see**
-- Methods like `confirm() / cancel() / reject() / markPaid() / complete()` are allowed or blocked depending on the current state.
-- State transitions happen inside concrete state classes.
-
----
-
-### 6.2 Factory Method (Payment creation)
-**Why**
-
-We support multiple payment methods. We do not want the service layer to directly depend on concrete classes like `new CreditCardPayment()` everywhere.
-
-**How it works in our code**
-- A factory creates the correct payment object based on the selected payment type
-- Payment processing uses the factory output instead of directly instantiating concrete classes
-
-**Main files**
-- Factory:
-  - `backend/payment/PaymentFactory.java`
-- Concrete factories / implementations under:
-  - `backend/payment/creditCard/`
-  - `backend/payment/debitCard/`
-  - `backend/payment/paypal/`
-  - `backend/payment/bankTransfer/`
-- Orchestration:
-  - `backend/core/PaymentService.java`
-
-**What you should see**
-- Adding a new payment method is mainly “add a new payment class + factory”, with minimal changes elsewhere.
+| Package | Responsibility |
+|---------|---------------|
+| `booking` | Booking lifecycle, state transitions |
+| `core` | Use case orchestration (ClientService, ConsultantService, etc.) |
+| `payment` | Payment creation, processing, transaction history |
+| `policy` | Business rules (cancellation, pricing, refunds) |
+| `user` | User entities, roles, access control |
+| `notification` | Simulated notifications |
+| `service` | Consulting service catalog |
+| `database` | PostgreSQL DAOs and connection management |
+| `api` | REST API endpoints |
 
 ---
 
-### 6.3 Proxy Pattern (Access control)
-**Why**
+## 6. API Endpoints
 
-Role checking and login checking can become duplicated if written in every service method.  
-We centralize access checks in one place.
+### Authentication
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/users/register` | Register new user |
+| POST | `/api/users/login` | User login |
+| GET | `/api/users/profile` | Get user profile |
 
-**How it works in our code**
-- `UserProxy` checks login status and user role before delegating operations to the real user object
+### Services
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/services` | Get all services |
+| POST | `/api/services/create` | Create new service |
 
-**Main files**
-- `backend/user/UserProxy.java`
-- `backend/user/User.java`
-- `backend/user/Client.java`
-- `backend/user/Consultant.java`
-- `backend/user/Admin.java`
+### Bookings
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/bookings/create` | Create booking |
+| GET | `/api/bookings/client` | Get client bookings |
+| GET | `/api/bookings/consultant` | Get consultant bookings |
+| POST | `/api/bookings/confirm` | Confirm booking |
+| POST | `/api/bookings/cancel` | Cancel booking |
+| POST | `/api/bookings/complete` | Complete booking |
 
----
+### Payments
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/payments/pay` | Process payment |
+| GET | `/api/payments/history` | Get payment history |
 
-### 6.4 Policy / Strategy-style design (Cancellation / Refund / Pricing rules)
-**Why**
+### AI Chatbot
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/ai/chat` | Chat with AI assistant |
 
-Business rules change. We do not want to hard-code rules inside booking lifecycle logic.
-
-**How it works in our code**
-- Policy interfaces represent rules
-- Implementations represent specific rule sets (default rules now, easy to extend later)
-
-**Main files**
-- `backend/policy/CancellationPolicy.java`
-- `backend/policy/DefaultCancellationPolicy.java`
-- Other policy interfaces/classes exist as extension points for Phase 2
-
----
-
-## 7. Service layer (where use cases are executed)
-Use cases are orchestrated in `backend/core/`:
-- `ClientService.java` — client workflows (request/cancel/browse/history)
-- `ConsultantService.java` — accept/reject/complete workflows
-- `PaymentService.java` — payment workflow + transaction + booking state update
-- `AdminService.java` — admin workflows (policy configuration; some parts may be minimal in Phase 1)
-- `BookingService.java` — booking management (in-memory demo style)
-
-The idea is:
-- **core** coordinates steps (use case flow)
-- **booking/payment/policy/user** implement domain rules and modules
+### System
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Health check |
 
 ---
 
-## 8. Data storage
-Phase 1 uses **in-memory storage** (lists/maps).  
-There is no database persistence in this phase.
+## 7. Demo Workflow
+
+### Quick Demo Path (5 minutes)
+
+1. **Start the application:**
+   ```bash
+   docker-compose up
+   ```
+
+2. **Open http://localhost:3000**
+
+3. **Register as Client:**
+   - Click "Register" tab
+   - Name: `John Doe`
+   - Email: `john@example.com`
+   - Password: `password123`
+   - Account Type: `Client`
+
+4. **Browse Services:**
+   - Navigate to "Browse Services"
+   - View available consulting services
+
+5. **Request Booking:**
+   - Click "Book Now" on a service
+   - Select consultant and time slot
+   - Submit booking request
+
+6. **Login as Consultant:**
+   - Logout and login as consultant
+   - Email: `consultant@example.com`
+   - Password: `demo123`
+   - Account Type: `Consultant`
+
+7. **Accept Booking:**
+   - Go to "Booking Requests"
+   - Click "Accept" on pending request
+
+8. **Login as Client and Pay:**
+   - Logout and login as client
+   - Go to "My Bookings"
+   - Click "Pay Now" on confirmed booking
+
+9. **Consultant Completes:**
+   - Login as consultant
+   - Mark booking as completed
+
+10. **Try AI Chatbot:**
+    - Ask questions like "How do I book?" or "What payment methods?"
 
 ---
 
-## 9. Notes / known limitations (Phase 1)
-- The UI is CLI-based (minimal frontend).
-- Some admin policy configuration is implemented as a framework/extension point rather than a full production system.
-- Payment and notification are simulated (no real external APIs).
+## 8. Booking Lifecycle
+
+```
+Requested → Confirmed → PendingPayment → Paid → Completed
+     ↓          ↓                           ↓
+ Rejected   Cancelled                    Cancelled
+```
+
+### State Transitions
+
+| From State | Action | To State | Actor |
+|------------|--------|----------|-------|
+| Requested | Confirm | Confirmed | Consultant |
+| Requested | Reject | Rejected | Consultant |
+| Confirmed | Cancel | Cancelled | Client |
+| Confirmed | Pay | Paid | Client |
+| Paid | Complete | Completed | Consultant |
+| Paid | Cancel | Cancelled + Refund | Client |
 
 ---
 
-## 10. How to demonstrate quickly (for evaluation)
-A quick demo path:
-1. Run `BookingUI`
-2. Login as Client → browse services → request booking
-3. Login as Consultant → accept booking
-4. Login as Client → pay
-5. Login as Consultant → complete booking
+## 9. AI Chatbot Documentation
+
+### Purpose
+The AI Customer Assistant helps clients with:
+- Platform navigation guidance
+- Booking process explanations
+- Payment method information
+- Cancellation policy questions
+- General troubleshooting
+
+### Privacy & Safety
+- **NO access** to personal user data
+- **NO access** to database or booking details
+- **NO automated actions** (chatbot only provides information)
+- Uses **rule-based responses** from predefined knowledge base
+
+### Implementation
+- Located: `backend/core/AIChatbotService.java`
+- API Endpoint: `POST /api/ai/chat`
+- Response format: `{"success": true, "response": "..."}`
+
+### Example Interactions
+
+| User Question | Chatbot Response |
+|--------------|------------------|
+| "How do I book?" | "To book a consultation, go to 'Browse Services' and click 'Book Now'..." |
+| "Can I cancel?" | "Yes, you can cancel from 'My Bookings'. Full refund if 48+ hours in advance..." |
+| "Payment methods?" | "We accept Credit Cards, Debit Cards, PayPal, and Bank Transfers..." |
 
 ---
 
-## 11. Team contribution (fill in)
-Member A:  Bin Tang
-- Responsible for backend
-- github name: K1fight
+## 10. Team Contributions
 
+| Member | Responsibilities | GitHub |
+|--------|-----------------|--------|
+| Bin Tang | Backend architecture, design patterns | K1fight |
+| Zehao Liu | Frontend, documentation, corrections | liu0205-mario |
+| Haiyun He | UML diagrams, backend additions | 3canary |
 
-Member B:  Zehao Liu
-- Responsible for correction of backend and frontend and documentation
-- github name: liu0205-mario
+---
 
+## 11. Configuration
 
-Member C:  Haiyun He
-- Responsible for UML diagrams and additions to the backend
-- github name: 3canary
+### Environment Variables (.env)
+
+```bash
+# Copy .env.example to .env
+cp .env.example .env
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_HOST` | localhost | Database host |
+| `DB_PORT` | 5434 | Database port |
+| `DB_NAME` | mydb | Database name |
+| `DB_USER` | myuser | Database user |
+| `DB_PASSWORD` | mypassword | Database password |
+| `SERVER_PORT` | 8080 | API server port |
+| `FRONTEND_PORT` | 3000 | Frontend port |
+
+---
+
+## 12. Known Limitations
+
+### Phase 1
+- In-memory storage (no persistence without Docker)
+- CLI frontend only
+
+### Phase 2
+- AI chatbot uses rule-based responses (not real LLM)
+- Simulated payments (no real payment gateway)
+- Demo credentials for quick testing
+
+---
+
+## 13. Troubleshooting
+
+### Docker Issues
+```bash
+# Rebuild containers
+docker-compose down
+docker-compose up --build
+
+# Check container logs
+docker-compose logs app
+docker-compose logs db
+```
+
+### Database Connection
+```bash
+# Test database connection
+docker exec -it eecs3311-db psql -U myuser -d mydb
+```
+
+### API Not Responding
+```bash
+# Check if server is running
+curl http://localhost:8080/api/health
+```
+
+---
+
+## 14. Testing
+
+### Manual Testing Checklist
+- [ ] User registration (Client/Consultant)
+- [ ] User login/logout
+- [ ] Browse services
+- [ ] Create booking
+- [ ] Consultant accept/reject
+- [ ] Client payment
+- [ ] Booking completion
+- [ ] Cancellation with policy
+- [ ] AI chatbot responses
+- [ ] Admin consultant approval
+
+### API Testing with curl
+```bash
+# Health check
+curl http://localhost:8080/api/health
+
+# Get services
+curl http://localhost:8080/api/services
+
+# Login
+curl -X POST http://localhost:8080/api/users/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"john@example.com","password":"password123"}'
+```
+
+---
+
+## 15. Future Enhancements (Phase 3)
+
+- Real LLM integration (OpenAI/Claude API)
+- Real payment gateway (Stripe/PayPal)
+- Email notifications
+- Calendar integration
+- Video consultation support
+- Mobile app
+
+---
+
+## License
+
+York University EECS 3311 Course Project - 2026
+
+---
+
+**Questions?** Check `API_DOCUMENTATION.md` or run `docker-compose logs` for debugging.

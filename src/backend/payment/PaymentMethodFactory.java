@@ -6,12 +6,12 @@ public class PaymentMethodFactory {
     
     public static PaymentMethod createPaymentMethod(String type, Map<String, String> details) {
         switch (type.toLowerCase()) {
-            case "credit":
-                return PaymentMethod.Credit;
-            case "debit":
-                return PaymentMethod.Debit;
+            case "creditcard":
+                return PaymentMethod.CreditCard;
+            case "debitcard":
+                return PaymentMethod.DebitCard;
             case "paypal":
-                return PaymentMethod.Paypal;
+                return PaymentMethod.PayPal;
             case "banktransfer":
                 return PaymentMethod.BankTransfer;
             default:

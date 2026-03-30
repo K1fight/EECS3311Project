@@ -11,7 +11,7 @@ public class DatabaseExample {
         DatabaseConnection db = DatabaseConnection.getInstance();
         
         try {
-            // Connect to database (uses SQLite by default)
+            // Connect to database (uses PostgreSQL by default)
             db.connect();
             
             // Initialize database schema
