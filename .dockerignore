@@ -1,0 +1,25 @@
+# Git files
+.git
+.gitignore
+.idea
+*.iml
+
+# Build outputs
+build/
+target/
+out/
+*.class
+
+# IDE files
+*.log
+.DS_Store
+Thumbs.db
+
+# Documentation (optional)
+*.md
+!README.md
+diagrams/
+
+# Test files (optional - remove if you want tests in container)
+*Test.java
+test/
