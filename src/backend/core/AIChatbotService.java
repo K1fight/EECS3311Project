@@ -1,182 +1,217 @@
 package backend.core;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.*;
 
 /**
- * AI Customer Assistant Chatbot
- * Provides automated responses to common client queries
+ * AI Customer Assistant - Using Alibaba Cloud DashScope (Qwen)
+ * Integrated with Alibaba Cloud DashScope (Qwen Turbo) API
  */
 public class AIChatbotService {
-    private Map<String, List<String>> knowledgeBase;
-    private Random random = new Random();
-    
+    private static final String API_KEY = "sk-12046456ede64cd3a9390203dc61a077";
+    private static final String API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
+    private static final String MODEL = "qwen-turbo";
+
+    private final HttpClient httpClient;
+    private final String systemPrompt;
+
     public AIChatbotService() {
-        initializeKnowledgeBase();
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(30))
+                .build();
+
+        // Build system prompt with platform information
+        this.systemPrompt = buildSystemPrompt();
     }
-    
-    private void initializeKnowledgeBase() {
-        knowledgeBase = new HashMap<>();
-        
-        // Greetings
-        List<String> greetings = Arrays.asList(
-            "Hello! How can I assist you today?",
-            "Hi there! Welcome to our consulting service.",
-            "Greetings! What can I help you with?",
-            "Hello! Feel free to ask me anything about our services."
-        );
-        knowledgeBase.put("greeting", greetings);
-        
-        // Booking information
-        List<String> bookingInfo = Arrays.asList(
-            "You can browse services from the main menu, select a consultant, and choose your preferred time slot.",
-            "To book a consultation, go to 'Request Booking' from your client menu. You'll need to select a service, consultant, and time.",
-            "Booking is easy! Just select the service you need, choose an available consultant, and pick a time that works for you."
-        );
-        knowledgeBase.put("how_to_book", bookingInfo);
-        
-        // Cancellation policy
-        List<String> cancellationPolicy = Arrays.asList(
-            "Our cancellation policy allows full refund if cancelled 48 hours before the appointment, and 50% refund if cancelled 24 hours before.",
-            "You can cancel your booking from the 'Cancel Booking' menu. Refunds are processed according to our cancellation policy.",
-            "Cancellations made 48+ hours in advance receive full refund. Cancellations 24-48 hours before receive 50% refund."
-        );
-        knowledgeBase.put("cancellation", cancellationPolicy);
-        
-        // Payment methods
-        List<String> paymentMethods = Arrays.asList(
-            "We accept Credit Cards, Debit Cards, PayPal, and Bank Transfers.",
-            "You can manage your payment methods in the 'Manage Payment Methods' section. We support all major credit cards and digital payment platforms.",
-            "For payments, we accept Visa, MasterCard, American Express, PayPal, and direct bank transfers."
-        );
-        knowledgeBase.put("payment", paymentMethods);
-        
-        // Service categories
-        List<String> services = Arrays.asList(
-            "We offer Career Counseling, IT Consulting, and Financial Advisory services.",
-            "Our consultants specialize in Career development, Technology, and Finance sectors.",
-            "You can choose from Career Counseling ($100/hr), IT Consulting ($150/hr), or Financial Advisory ($200/hr)."
-        );
-        knowledgeBase.put("services", services);
-        
-        // Consultant approval
-        List<String> consultantApproval = Arrays.asList(
-            "All our consultants are verified professionals with extensive industry experience.",
-            "Consultants must be approved by our admin team before they can accept bookings.",
-            "Our consultants undergo a rigorous verification process to ensure quality service."
-        );
-        knowledgeBase.put("consultant", consultantApproval);
-        
-        // Technical support
-        List<String> technicalSupport = Arrays.asList(
-            "If you're experiencing technical issues, please try refreshing the page or logging out and back in.",
-            "For technical support, you can contact our support team at support@consulting.com.",
-            "Having issues? Try clearing your browser cache or using a different browser."
-        );
-        knowledgeBase.put("technical", technicalSupport);
-        
-        // Hours of operation
-        List<String> hours = Arrays.asList(
-            "Our system is available 24/7 for booking. Consultants typically work during business hours (9 AM - 6 PM).",
-            "You can book consultations anytime through this system. Available time slots depend on individual consultant availability.",
-            "The booking platform is always open! Consultant availability varies, but most are available weekdays 9 AM - 6 PM."
-        );
-        knowledgeBase.put("hours", hours);
-        
-        // Default responses
-        List<String> defaultResponses = Arrays.asList(
-            "I'm not sure I understand. Could you rephrase that? Or you can ask about bookings, payments, services, or cancellations.",
-            "That's an interesting question. For specific inquiries, please contact our support team. Is there anything else I can help with?",
-            "I'm still learning! You can ask me about how to book, payment options, cancellation policy, or our services."
-        );
-        knowledgeBase.put("default", defaultResponses);
-    }
-    
+
     /**
-     * Get a response from the chatbot based on user input
-     * @param userInput The user's message
-     * @return Chatbot's response
+     * Build system prompt with platform context
      */
-    public String getResponse(String userInput) {
-        if (userInput == null || userInput.trim().isEmpty()) {
-            return getRandomResponse("default");
-        }
-        
-        String input = userInput.toLowerCase();
-        
-        // Check for different intents
-        if (containsAny(input, Arrays.asList("hello", "hi", "hey", "greetings", "good morning", "good afternoon"))) {
-            return getRandomResponse("greeting");
-        }
-        
-        if (containsAny(input, Arrays.asList("book", "booking", "reserve", "appointment", "schedule"))) {
-            return getRandomResponse("how_to_book");
-        }
-        
-        if (containsAny(input, Arrays.asList("cancel", "cancellation", "refund", "money back"))) {
-            return getRandomResponse("cancellation");
-        }
-        
-        if (containsAny(input, Arrays.asList("pay", "payment", "credit card", "debit card", "paypal", "bank transfer"))) {
-            return getRandomResponse("payment");
-        }
-        
-        if (containsAny(input, Arrays.asList("service", "consulting", "career", "it", "finance", "price", "cost"))) {
-            return getRandomResponse("services");
-        }
-        
-        if (containsAny(input, Arrays.asList("consultant", "expert", "advisor", "professional"))) {
-            return getRandomResponse("consultant");
-        }
-        
-        if (containsAny(input, Arrays.asList("issue", "problem", "error", "bug", "not working", "technical"))) {
-            return getRandomResponse("technical");
-        }
-        
-        if (containsAny(input, Arrays.asList("hour", "time", "available", "open", "close"))) {
-            return getRandomResponse("hours");
-        }
-        
-        // Default response if no match found
-        return getRandomResponse("default");
+    private String buildSystemPrompt() {
+        return """
+You are a smart customer service assistant for a consulting booking platform. Please answer user questions based on the following information.
+
+## Platform Features
+- Users can register as Client or Consultant
+- Clients can browse services, book consultations, make payments, and manage payment methods
+- Consultants can accept/reject bookings and manage availability
+- Admins can approve consultants and set policies
+
+## Service Types
+1. Career Counseling - $100/hour
+2. IT Consulting - $150/hour
+3. Financial Advisory - $200/hour
+
+## Payment Methods
+- Credit Card
+- Debit Card
+- PayPal
+- Bank Transfer
+
+## Cancellation Policy
+- Cancel 48+ hours in advance: Full refund
+- Cancel 24-48 hours in advance: 50% refund
+- Cancel within 24 hours: No refund
+
+## Service Hours
+- System available 24/7
+- Consultants available weekdays 9 AM - 6 PM
+
+Please respond in a friendly and professional manner. If unsure or out of scope, advise user to contact customer support.
+""";
     }
-    
+
     /**
-     * Get a random response from a specific category
+     * Send chat request to Alibaba Cloud DashScope
+     * @param userMessage The user's message
+     * @return AI response
      */
-    private String getRandomResponse(String category) {
-        List<String> responses = knowledgeBase.get(category);
-        if (responses != null && !responses.isEmpty()) {
-            return responses.get(random.nextInt(responses.size()));
+    public String chat(String userMessage) {
+        try {
+            // Build request body
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("model", MODEL);
+
+            // Build messages list
+            List<Map<String, String>> messages = new ArrayList<>();
+
+            // System message
+            Map<String, String> systemMsg = new HashMap<>();
+            systemMsg.put("role", "system");
+            systemMsg.put("content", systemPrompt);
+            messages.add(systemMsg);
+
+            // User message
+            Map<String, String> userMsg = new HashMap<>();
+            userMsg.put("role", "user");
+            userMsg.put("content", userMessage);
+            messages.add(userMsg);
+
+            requestBody.put("messages", messages);
+
+            // Convert to JSON
+            String jsonBody = toJson(requestBody);
+
+            // Build HTTP request
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(API_URL))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + API_KEY)
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .timeout(Duration.ofSeconds(30))
+                    .build();
+
+            // Send request
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            // Parse response
+            if (response.statusCode() == 200) {
+                return parseResponse(response.body());
+            } else {
+                System.err.println("AI API Error: " + response.statusCode() + " - " + response.body());
+                return "Sorry, I cannot answer right now. Please try again later or contact customer support.";
+            }
+
+        } catch (Exception e) {
+            System.err.println("AI Chat Error: " + e.getMessage());
+            return "Sorry, there is a connection issue. Please try again later.";
         }
-        return "I'm sorry, I don't have information about that.";
     }
-    
+
     /**
-     * Check if input contains any of the keywords
+     * Parse API response
      */
-    private boolean containsAny(String input, List<String> keywords) {
-        for (String keyword : keywords) {
-            if (input.contains(keyword)) {
-                return true;
+    private String parseResponse(String responseBody) {
+        try {
+            // Simple JSON parsing (avoiding external dependencies)
+            int choicesStart = responseBody.indexOf("\"choices\"");
+            if (choicesStart == -1) return "Unable to parse response";
+
+            int messageStart = responseBody.indexOf("\"message\"", choicesStart);
+            if (messageStart == -1) return "Unable to parse response";
+
+            int contentStart = responseBody.indexOf("\"content\"", messageStart);
+            if (contentStart == -1) return "Unable to parse response";
+
+            // Find start and end quotes of content
+            int contentQuoteStart = responseBody.indexOf("\"", contentStart + 9);
+            if (contentQuoteStart == -1) return "Unable to parse response";
+
+            int contentQuoteEnd = responseBody.indexOf("\"", contentQuoteStart + 1);
+            if (contentQuoteEnd == -1) return "Unable to parse response";
+
+            return responseBody.substring(contentQuoteStart + 1, contentQuoteEnd);
+        } catch (Exception e) {
+            System.err.println("Parse error: " + e.getMessage());
+            return "Unable to parse AI response";
+        }
+    }
+
+    /**
+     * Simple Map to JSON conversion (avoiding Jackson/Gson)
+     */
+    private String toJson(Map<String, Object> map) {
+        StringBuilder sb = new StringBuilder("{");
+        boolean first = true;
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            if (!first) sb.append(",");
+            first = false;
+            sb.append("\"").append(entry.getKey()).append("\":");
+            Object value = entry.getValue();
+            if (value instanceof String) {
+                sb.append("\"").append(escapeJson((String) value)).append("\"");
+            } else if (value instanceof List) {
+                sb.append(listToJson((List<?>) value));
+            } else {
+                sb.append(value);
             }
         }
-        return false;
+        sb.append("}");
+        return sb.toString();
     }
-    
+
+    private String listToJson(List<?> list) {
+        StringBuilder sb = new StringBuilder("[");
+        boolean first = true;
+        for (Object item : list) {
+            if (!first) sb.append(",");
+            first = false;
+            if (item instanceof Map) {
+                sb.append(toJson((Map<String, Object>) item));
+            }
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    private String escapeJson(String s) {
+        return s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+
     /**
-     * Display help information about what the chatbot can do
+     * Test connection
      */
-    public void displayHelp() {
-        System.out.println("\n=== AI Customer Assistant Help ===");
-        System.out.println("I can help you with:");
-        System.out.println("- Booking information (ask about 'booking', 'reserve', 'appointment')");
-        System.out.println("- Cancellation policy (ask about 'cancel', 'refund')");
-        System.out.println("- Payment methods (ask about 'payment', 'credit card', 'paypal')");
-        System.out.println("- Our services (ask about 'services', 'career', 'IT', 'finance')");
-        System.out.println("- Consultants (ask about 'consultant', 'advisor')");
-        System.out.println("- Technical support (ask about 'issue', 'problem', 'error')");
-        System.out.println("- Operating hours (ask about 'hours', 'available', 'open')");
-        System.out.println("\nType 'quit' or 'exit' to leave the chat.");
-        System.out.println("=================================\n");
+    public boolean testConnection() {
+        try {
+            String response = chat("Hello");
+            return response != null && !response.isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Get response (alias for chat method - for backward compatibility)
+     */
+    public String getResponse(String message) {
+        return chat(message);
     }
 }

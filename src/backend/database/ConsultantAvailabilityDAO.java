@@ -30,6 +30,7 @@ public class ConsultantAvailabilityDAO extends BaseDAO {
         
         try {
             String availabilityId = UUID.randomUUID().toString();
+            System.out.println("Attempting to insert availability for consultant: " + consultantId);
             int rows = executeUpdate(sql,
                 availabilityId,
                 consultantId,
@@ -37,9 +38,21 @@ public class ConsultantAvailabilityDAO extends BaseDAO {
                 endTime,
                 true
             );
-            return rows > 0;
+            if (rows > 0) {
+                System.out.println("Successfully inserted availability into database");
+                return true;
+            } else {
+                System.err.println("No rows inserted - check if consultant exists in database");
+                return false;
+            }
         } catch (SQLException e) {
-            System.err.println("Error adding availability: " + e.getMessage());
+            System.err.println("SQL Error adding availability: " + e.getMessage());
+            System.err.println("SQL State: " + e.getSQLState());
+            System.err.println("Error Code: " + e.getErrorCode());
+            // Check if it's a foreign key violation
+            if (e.getSQLState() != null && e.getSQLState().equals("23503")) {
+                System.err.println("Foreign key violation: Consultant ID " + consultantId + " does not exist in users table!");
+            }
             return false;
         }
     }

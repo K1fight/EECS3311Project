@@ -32,6 +32,9 @@ public class Booking {
         this.service = service;
         this.startTime = startTime;
         this.endTime = startTime.plusMinutes(service.getDurationMinutes());
+        // Initialize default state to avoid NullPointerException on state transitions
+        this.currentState = new RequestedState();
+        this.status = BookingStatus.Requested;
     }
 
     public void addObserver(NotificationService observer) {
@@ -79,6 +82,7 @@ public class Booking {
     public Client getClient() { return client; }
     public Consultant getConsultant() { return consultant; }
     public BookingState getCurrentState() { return currentState; }
+    public void setCurrentState(BookingState state) { this.currentState = state; }
     public LocalDateTime getStartTime() { return startTime; }
     public ConsultingService getService() { return service; }
     public BookingStatus getStatus() { return status; }

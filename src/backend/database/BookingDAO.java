@@ -4,6 +4,7 @@ import backend.booking.Booking;
 import backend.booking.*;
 import backend.user.Client;
 import backend.user.Consultant;
+import backend.user.User;
 import backend.core.ConsultingService;
 
 import java.sql.ResultSet;
@@ -155,37 +156,36 @@ public class BookingDAO extends BaseDAO {
     }
     
     /**
-     * Map ResultSet to Booking object
-     * Note: This is a simplified mapping. In production, you'd need to load related entities.
-     * @param rs ResultSet
-     * @return Booking object
-     * @throws SQLException if mapping fails
+     * Map ResultSet to Booking object - loads related entities from DB
      */
     private Booking mapResultSetToBooking(ResultSet rs) throws SQLException {
-        // This is a simplified version - in real implementation,
-        // you would fetch the related User and ConsultingService objects
-        // from their respective DAOs
-        
         UUID bookingId = UUID.fromString(rs.getString("booking_id"));
         String clientId = rs.getString("client_id");
         String consultantId = rs.getString("consultant_id");
-        UUID serviceId = UUID.fromString(rs.getString("service_id"));
+        String serviceIdStr = rs.getString("service_id");
         LocalDateTime startTime = rs.getTimestamp("start_time").toLocalDateTime();
         BookingStatus status = BookingStatus.valueOf(rs.getString("status"));
         String stateClassName = rs.getString("current_state");
-        
-        // Create placeholder objects - in production, fetch actual objects
-        Client client = new Client("", "", "");
-        Consultant consultant = new Consultant("", "", "");
-        ConsultingService service = new ConsultingService();
-        
-        // Use reflection or factory to create state object
+
+        // Load related entities from DB
+        UserDAO userDAO = new UserDAO();
+        ServiceDAO serviceDAO = new ServiceDAO();
+
+        User clientUser = userDAO.findById(clientId);
+        User consultantUser = userDAO.findById(consultantId);
+        ConsultingService service = serviceDAO.findById(UUID.fromString(serviceIdStr));
+
+        // Fallback to placeholder if not found
+        Client client = (clientUser instanceof Client c) ? c : new Client("Unknown Client", "", "");
+        Consultant consultant = (consultantUser instanceof Consultant c) ? c : new Consultant("Unknown Consultant", "", "");
+        if (service == null) service = new ConsultingService();
+
         BookingState state = createBookingState(stateClassName);
-        
+
         Booking booking = new Booking(client, consultant, service, startTime);
-        // Override the auto-generated ID
-        // Note: This requires making bookingId settable or using a special constructor
-        
+        booking.setStatus(status);
+        booking.setCurrentState(state);
+
         return booking;
     }
     

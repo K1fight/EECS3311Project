@@ -24,7 +24,22 @@ public class DatabaseConnection {
     private DatabaseConnection() {
         this.dbProperties = new Properties();
         loadDatabaseProperties();
-        
+
+        // Environment variables override properties file (for Docker)
+        String dbHost = System.getenv("DB_HOST");
+        String dbPort = System.getenv("DB_PORT");
+        String dbName = System.getenv("DB_NAME");
+        String dbUser = System.getenv("DB_USER");
+        String dbPass = System.getenv("DB_PASSWORD");
+
+        if (dbHost != null) {
+            String port = (dbPort != null) ? dbPort : "5432";
+            String name = (dbName != null) ? dbName : dbProperties.getProperty("db.url", "").replaceAll(".*/(\\w+)$", "$1");
+            dbProperties.setProperty("db.url", "jdbc:postgresql://" + dbHost + ":" + port + "/" + name);
+        }
+        if (dbUser != null) dbProperties.setProperty("db.username", dbUser);
+        if (dbPass != null) dbProperties.setProperty("db.password", dbPass);
+
         this.url = dbProperties.getProperty("db.url");
         this.username = dbProperties.getProperty("db.username");
         this.password = dbProperties.getProperty("db.password");
