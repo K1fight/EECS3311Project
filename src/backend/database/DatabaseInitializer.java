@@ -190,7 +190,11 @@ public class DatabaseInitializer extends BaseDAO {
                 client_id TEXT NOT NULL,
                 consultant_id TEXT NOT NULL,
                 service_id TEXT NOT NULL,
-                start_time TIMESTAMP NOT NULL,
+                start_time TIMESTAMP NOT NULL 
+                CHECK (
+                    start_time >= CURRENT_DATE + INTERVAL '1 day'
+                    AND start_time::time BETWEEN TIME '09:00' AND TIME '17:00'
+                ),
                 status TEXT NOT NULL CHECK(status IN ('Requested', 'Confirmed', 'Paid', 'Rejected', 'Cancelled', 'Completed')),
                 current_state TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
