@@ -11,7 +11,7 @@ https://github.com/K1fight/EECS3311Project.git
 This is a **complete service booking and consulting platform** that connects clients with consultants. The system manages:
 
 - Consulting services catalog
-- Booking lifecycle (request → confirm → pay → complete)
+- Booking lifecycle (request → confirm → pending → pay → complete)
 - Payment processing (simulated)
 - User authentication and authorization
 - Admin oversight
@@ -28,7 +28,7 @@ This is a **complete service booking and consulting platform** that connects cli
 
 ## 2. Features
 
-### Phase 1 Features ✅
+### Phase 1 Features
 - **Client**
   - Browse consulting services
   - Request a booking
@@ -45,9 +45,9 @@ This is a **complete service booking and consulting platform** that connects cli
   - Approve consultant registrations
   - Define system policies (cancellation, pricing)
 
-### Phase 2 Features ✅
-- **Complete Web Frontend** (HTML/CSS/JavaScript)
-- **Docker Deployment** (4 containers: backend, frontend, database, builder)
+### Phase 2 Features
+- **CLI frontend** (All core system workflows)
+- **Docker Deployment** (3 containers: backend, frontend, database)
 - **AI Customer Assistant Chatbot** (rule-based, privacy-safe)
 
 ---
@@ -66,19 +66,16 @@ This is a **complete service booking and consulting platform** that connects cli
 
 ## 4. How to Run
 
-### Option A: Docker (Recommended - Phase 2)
-
 **Single command deployment:**
 
 ```bash
 docker-compose up --build
 ```
 
-This starts 4 containers:
+This starts 3 containers:
 - `eecs3311-db` - PostgreSQL database (port 5434)
-- `eecs3311-builder` - Java build container
-- `eecs3311-app` - Backend API (port 8080)
-- `eecs3311-frontend` - Web UI (port 3000)
+- `eecs3311-backend` - Backend API (port 8080)
+- `eecs3311-frontend` - CLI
 
 **Access the application:**
 - Frontend: http://localhost:3000
@@ -88,31 +85,6 @@ This starts 4 containers:
 **Stop the application:**
 ```bash
 docker-compose down
-```
-
-### Option B: Local Development (Phase 1)
-
-**Prerequisites:**
-- Java 17+
-- PostgreSQL (optional, runs in demo mode without DB)
-
-**Steps:**
-1. Compile the project:
-```bash
-mkdir -p build/classes lib
-wget -O lib/postgresql-42.6.0.jar https://jdbc.postgresql.org/download/postgresql-42.6.0.jar
-javac -d build/classes -cp "src:lib/*" src/backend/**/*.java
-```
-
-2. Run the API server:
-```bash
-java -cp "build/classes:lib/*" backend.Main
-```
-
-3. Open frontend in browser:
-```bash
-# Open frontend/index.html in your browser
-# Or serve with a local web server
 ```
 
 ---
@@ -133,8 +105,7 @@ EECS3311Project/
 │   │   ├── service/          # Service entities
 │   │   └── user/             # Users + Proxy pattern
 │   └── frontend/
-│       ├── index.html        # Main UI
-│       ├── app.js            # Frontend logic
+│       ├── BookingUI.java    # UI
 │       └── Dockerfile        # Frontend container
 ├── diagrams/                 # UML diagrams
 ├── docker-compose.yml        # Docker orchestration
@@ -212,44 +183,42 @@ EECS3311Project/
    docker-compose up
    ```
 
-2. **Open http://localhost:3000**
-
-3. **Register as Client:**
+2. **Register as Client:**
    - Click "Register" tab
    - Name: `John Doe`
    - Email: `john@example.com`
    - Password: `password123`
    - Account Type: `Client`
 
-4. **Browse Services:**
+3. **Browse Services:**
    - Navigate to "Browse Services"
    - View available consulting services
 
-5. **Request Booking:**
+4. **Request Booking:**
    - Click "Book Now" on a service
    - Select consultant and time slot
    - Submit booking request
 
-6. **Login as Consultant:**
+5. **Login as Consultant:**
    - Logout and login as consultant
    - Email: `consultant@example.com`
    - Password: `demo123`
    - Account Type: `Consultant`
 
-7. **Accept Booking:**
+6. **Accept Booking:**
    - Go to "Booking Requests"
    - Click "Accept" on pending request
 
-8. **Login as Client and Pay:**
+7. **Login as Client and Pay:**
    - Logout and login as client
    - Go to "My Bookings"
    - Click "Pay Now" on confirmed booking
 
-9. **Consultant Completes:**
+8. **Consultant Completes:**
    - Login as consultant
    - Mark booking as completed
 
-10. **Try AI Chatbot:**
+9. **Try AI Chatbot:**
     - Ask questions like "How do I book?" or "What payment methods?"
 
 ---
@@ -341,10 +310,9 @@ cp .env.example .env
 
 ### Phase 1
 - In-memory storage (no persistence without Docker)
-- CLI frontend only
+- CLI frontend with basic features
 
 ### Phase 2
-- AI chatbot uses rule-based responses (not real LLM)
 - Simulated payments (no real payment gateway)
 - Demo credentials for quick testing
 
@@ -409,7 +377,6 @@ curl -X POST http://localhost:8080/api/users/login \
 
 ## 15. Future Enhancements (Phase 3)
 
-- Real LLM integration (OpenAI/Claude API)
 - Real payment gateway (Stripe/PayPal)
 - Email notifications
 - Calendar integration
