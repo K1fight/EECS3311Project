@@ -73,6 +73,7 @@ This is a **complete service booking and consulting platform** that connects cli
 
 ```bash
 docker-compose up --build
+docer attach eecs3311-frontend
 ```
 
 This starts 3 containers:
