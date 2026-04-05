@@ -77,7 +77,6 @@ docker-compose up --build
 
 This starts 4 containers:
 - `eecs3311-db` - PostgreSQL database (port 5434)
-- `eecs3311-builder` - Java build container
 - `eecs3311-app` - Backend API (port 8080)
 - `eecs3311-frontend` - Web UI (port 3000)
 
