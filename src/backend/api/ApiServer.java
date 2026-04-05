@@ -3,6 +3,7 @@ package backend.api;
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpExchange;
+import backend.EnvConfig;
 import backend.database.DatabaseConnection;
 import backend.database.DatabaseInitializer;
 import backend.database.UserDAO;
@@ -53,10 +54,11 @@ public class ApiServer {
     private PaymentMethodDAO paymentMethodDAO;
     private ConsultantAvailabilityDAO availabilityDAO;
 
-    private static final int PORT = 8080;
+    private final int PORT = EnvConfig.getInt("SERVER_PORT", 8080);
 
     // In-memory storage for demo (fallback when DB not available)
     private static Map<String, User> usersByEmail = new HashMap<>();
+    private static Map<String, User> usersById = new HashMap<>();  // userId (String) → User
     private static Map<UUID, backend.core.ConsultingService> services = new HashMap<>();
     private static Map<UUID, Booking> bookings = new HashMap<>();
     private static Map<String, PaymentTransaction> payments = new HashMap<>();
@@ -91,6 +93,7 @@ public class ApiServer {
                 // Initialize services
                 userService = new UserService();
                 bookingService = new BookingService();
+                bookingService.setBookingDAO(bookingDAO);  // inject DAO so local fallback persists to DB
                 consultingService = new backend.core.ConsultingService();
                 paymentService = new PaymentService();
                 clientService = new ClientService();
@@ -129,6 +132,7 @@ public class ApiServer {
         server.createContext("/api/users/login", new LoginHandler(this));
         server.createContext("/api/users/profile", new ProfileHandler(this));
         server.createContext("/api/users/consultants", new GetConsultantsHandler(this));
+        server.createContext("/api/users/pending-consultants", new GetPendingConsultantsHandler(this));
         server.createContext("/api/users/clients", new GetClientsHandler(this));
         server.createContext("/api/users/approve-consultant", new ApproveConsultantHandler(this));
         server.createContext("/api/users/reject-consultant", new RejectConsultantHandler(this));
@@ -142,6 +146,7 @@ public class ApiServer {
         server.createContext("/api/bookings/client", new GetClientBookingsHandler(this));
         server.createContext("/api/bookings/consultant", new GetConsultantBookingsHandler(this));
         server.createContext("/api/bookings/confirm", new ConfirmBookingHandler(this));
+        server.createContext("/api/bookings/reject", new RejectBookingHandler(this));
         server.createContext("/api/bookings/cancel", new CancelBookingHandler(this));
         server.createContext("/api/bookings/complete", new CompleteBookingHandler(this));
 
@@ -191,6 +196,15 @@ public class ApiServer {
             return;
         }
 
+        // Log ALL outgoing responses for debugging
+        String method = exchange.getRequestMethod();
+        String uri = exchange.getRequestURI().toString();
+        System.out.println("\n========== API RESPONSE ==========");
+        System.out.println("[" + method + "] " + uri);
+        System.out.println("HTTP Status: " + statusCode);
+        System.out.println("Body: " + jsonResponse);
+        System.out.println("==================================\n");
+
         byte[] res = jsonResponse.getBytes(StandardCharsets.UTF_8);
         exchange.sendResponseHeaders(statusCode, res.length);
 
@@ -201,7 +215,20 @@ public class ApiServer {
 
     // Helper to read request body
     public String readRequestBody(HttpExchange exchange) throws IOException {
-        return new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        String method = exchange.getRequestMethod();
+        String uri = exchange.getRequestURI().toString();
+        String auth = exchange.getRequestHeaders().getFirst("Authorization");
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+
+        System.out.println("\n<<<< API REQUEST >>>>");
+        System.out.println("[" + method + "] " + uri);
+        System.out.println("Authorization: " + (auth != null ? auth : "(none)"));
+        if (!body.isBlank()) {
+            System.out.println("Body: " + body);
+        }
+        System.out.println("<<<< END REQUEST >>>>\n");
+
+        return body;
     }
 
     // Helper to parse JSON body - handles values containing colons (e.g. timestamps, URLs)
@@ -264,6 +291,89 @@ public class ApiServer {
         return map;
     }
 
+    /**
+     * Wrap a raw string in a JSON-safe quoted string.
+     * Escapes backslash and double-quote characters.
+     * Called from static inner classes — must be static.
+     */
+    private static String safeJson(String raw) {
+        if (raw == null) return "null";
+        String escaped = raw.replace("\\", "\\\\").replace("\"", "\\\"");
+        return "\"" + escaped + "\"";
+    }
+
+    // ======================== AUTH HELPER ========================
+
+    /**
+     * Authenticate the caller via Authorization header: {userId}
+     * Returns the authenticated User, or null on failure (response already sent).
+     */
+    User authenticate(HttpExchange exchange, boolean requireAuth) throws IOException {
+        String auth = exchange.getRequestHeaders().getFirst("Authorization");
+        System.out.println("[authenticate] Authorization header=" + (auth != null ? auth : "null"));
+        if (auth == null || auth.isBlank()) {
+            if (requireAuth) {
+                sendResponse(exchange, "{\"success\":false,\"error\":\"Authorization header required\"}", 401);
+                return null;
+            }
+            return null;
+        }
+        String userId = auth.trim();
+
+        User user = null;
+        if (userDAO != null) {
+            try {
+                user = userDAO.findById(userId);
+                System.out.println("[authenticate] userId=" + userId + " → userDAO.findById=" + (user != null ? user.getEmail() + "/" + user.getUserID() : "null"));
+            } catch (Exception e) {
+                System.err.println("[authenticate] userDAO.findById error: " + e.getMessage());
+            }
+        }
+        if (user == null) {
+            user = usersById.get(userId);            // direct O(1) lookup
+            System.out.println("[authenticate] userId=" + userId + " → usersById.get=" + (user != null ? user.getEmail() : "null"));
+        }
+        if (user == null) {
+            for (User u : usersByEmail.values()) {
+                if (u.getUserID().toString().equals(userId)) {
+                    user = u;
+                    break;
+                }
+            }
+            System.out.println("[authenticate] userId=" + userId + " → usersByEmail scan=" + (user != null ? user.getEmail() : "null"));
+        }
+        if (user == null) {
+            if (requireAuth) {
+                System.err.println("[authenticate] User not found: " + userId);
+                sendResponse(exchange, "{\"success\":false,\"error\":\"User not found\"}", 401);
+            }
+            return null;
+        }
+        System.out.println("[authenticate] Success: " + user.getEmail() + " (" + user.getAccountType() + ")");
+        return user;
+    }
+
+    /**
+     * Require the caller to have one of the given account types.
+     * Sends 403 and returns false if the check fails.
+     */
+    boolean requireRole(HttpExchange exchange, User user, String... allowed) throws IOException {
+        if (user == null) {
+            sendResponse(exchange, "{\"success\":false,\"error\":\"Unauthorized\"}", 401);
+            return false;
+        }
+        String actual = user.getAccountType().toString();
+        for (String role : allowed) {
+            if (actual.equalsIgnoreCase(role)) {
+                return true;
+            }
+        }
+        sendResponse(exchange,
+            "{\"success\":false,\"error\":\"Forbidden: requires \" + String.join(\" or \", allowed) + \" role\"}",
+            403);
+        return false;
+    }
+
     // ======================== HANDLERS ========================
 
     static class HealthCheckHandler implements HttpHandler {
@@ -297,26 +407,52 @@ public class ApiServer {
 
             try {
                 if ("Client".equals(accountType)) {
+                    // Database-first: register directly in DB
+                    if (api.userDAO != null) {
+                        User existing = api.userDAO.findByEmail(email);
+                        if (existing != null) {
+                            api.sendResponse(exchange, "{\"success\":false,\"error\":\"Email already registered\"}", 400);
+                            return;
+                        }
+                        Client client = new Client(name, email, password);
+                        boolean inserted = api.userDAO.insert(client);
+                        if (inserted) {
+                            User dbUser = api.userDAO.findByEmail(email);
+                            String userId = dbUser != null ? dbUser.getUserID().toString() : "unknown";
+                            System.out.println("Client registered in DB: userId=" + userId + ", email=" + email);
+                            api.sendResponse(exchange, "{\"success\":true,\"userId\":\"" + userId + "\",\"message\":\"User registered successfully\"}", 200);
+                            return;
+                        }
+                    }
+                    // Memory fallback only if DB is unavailable
                     Client client = api.userService.registerClient(name, email, password);
                     if (client != null) {
-                        // Save to database
-                        if (api.userDAO != null) {
-                            api.userDAO.insert(client);
-                        }
-                        api.usersByEmail.put(email, client);
-                        api.sendResponse(exchange, "{\"success\":true,\"userId\":\"" + client.getUserID() + "\",\"message\":\"User registered successfully\"}", 200);
+                        api.sendResponse(exchange, "{\"success\":true,\"userId\":\"" + client.getUserID().toString() + "\",\"message\":\"User registered successfully (memory mode)\"}", 200);
                     } else {
                         api.sendResponse(exchange, "{\"success\":false,\"error\":\"Registration failed\"}", 400);
                     }
                 } else if ("Consultant".equals(accountType)) {
+                    // Database-first: register directly in DB
+                    if (api.userDAO != null) {
+                        User existing = api.userDAO.findByEmail(email);
+                        if (existing != null) {
+                            api.sendResponse(exchange, "{\"success\":false,\"error\":\"Email already registered\"}", 400);
+                            return;
+                        }
+                        Consultant consultant = new Consultant(java.util.UUID.randomUUID(), name, email, password, false);
+                        boolean inserted = api.userDAO.insert(consultant);
+                        if (inserted) {
+                            User dbUser = api.userDAO.findByEmail(email);
+                            String userId = dbUser != null ? dbUser.getUserID().toString() : "unknown";
+                            System.out.println("Consultant registered in DB: userId=" + userId + ", email=" + email);
+                            api.sendResponse(exchange, "{\"success\":true,\"userId\":\"" + userId + "\",\"message\":\"User registered successfully\"}", 200);
+                            return;
+                        }
+                    }
+                    // Memory fallback only if DB is unavailable
                     Consultant consultant = api.userService.registerConsultant(name, email, password);
                     if (consultant != null) {
-                        // Save to database
-                        if (api.userDAO != null) {
-                            api.userDAO.insert(consultant);
-                        }
-                        api.usersByEmail.put(email, consultant);
-                        api.sendResponse(exchange, "{\"success\":true,\"userId\":\"" + consultant.getUserID() + "\",\"message\":\"User registered successfully\"}", 200);
+                        api.sendResponse(exchange, "{\"success\":true,\"userId\":\"" + consultant.getUserID().toString() + "\",\"message\":\"User registered successfully (memory mode)\"}", 200);
                     } else {
                         api.sendResponse(exchange, "{\"success\":false,\"error\":\"Registration failed\"}", 400);
                     }
@@ -340,40 +476,60 @@ public class ApiServer {
 
             String email = data.get("email");
             String password = data.get("password");
+            String accountType = data.get("accountType"); // optional: enforce role
 
             if (email == null || password == null) {
                 api.sendResponse(exchange, "{\"success\":false,\"error\":\"Missing email or password\"}", 400);
                 return;
             }
 
-            // Try database first
+            // Database-first: always query DB for latest data
             User user = null;
             if (api.userDAO != null) {
                 user = api.userDAO.findByEmail(email);
-                if (user != null && !user.getPassword().equals(password)) {
-                    user = null; // wrong password
+                if (user != null) {
+                    if (!user.getPassword().equals(password)) {
+                        api.sendResponse(exchange, "{\"success\":false,\"error\":\"Invalid credentials\"}", 401);
+                        return;
+                    }
+                    if (user instanceof Consultant c && !c.isApproved()) {
+                        api.sendResponse(exchange, "{\"success\":false,\"error\":\"Account pending approval\"}", 401);
+                        return;
+                    }
+                    if (accountType != null && !accountType.isEmpty()
+                            && !user.getAccountType().toString().equalsIgnoreCase(accountType)) {
+                        api.sendResponse(exchange,
+                            "{\"success\":false,\"error\":\"Account type mismatch: cannot log in as \" + accountType}",
+                            403);
+                        return;
+                    }
                 }
-                // Consultant must be approved
-                if (user instanceof Consultant c && !c.isApproved()) {
-                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Account pending approval\"}", 401);
+            }
+
+            // Fallback to in-memory ONLY when DB is not available (userDAO == null)
+            if (user == null && api.userDAO == null) {
+                user = api.userService.authenticateUser(email, password);
+                if (user == null) {
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Invalid credentials\"}", 401);
                     return;
                 }
             }
 
-            // Fallback to in-memory
             if (user == null) {
-                user = api.userService.authenticateUser(email, password);
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Invalid credentials\"}", 401);
+                return;
             }
 
-            if (user != null) {
-                String response = "{\"success\":true,\"user\":{\"userId\":\"" + user.getUserID() +
-                    "\",\"name\":\"" + user.getName() +
-                    "\",\"email\":\"" + user.getEmail() +
-                    "\",\"accountType\":\"" + user.getAccountType() + "\"}}";
-                api.sendResponse(exchange, response, 200);
-            } else {
-                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Invalid credentials\"}", 401);
-            }
+            String actualUserId = user.getUserID().toString();
+            boolean isApproved = false;
+            if (user instanceof Consultant c) isApproved = c.isApproved();
+
+            String response = "{\"success\":true,\"userId\":\"" + actualUserId +
+                "\",\"name\":\"" + user.getName() +
+                "\",\"email\":\"" + user.getEmail() +
+                "\",\"accountType\":\"" + user.getAccountType() +
+                "\",\"isApproved\":" + isApproved + "}";
+            api.sendResponse(exchange, response, 200);
         }
     }
 
@@ -392,13 +548,24 @@ public class ApiServer {
                 return;
             }
 
-            // Try database first
+            // Authenticate caller
+            User caller = api.authenticate(exchange, true);
+            if (caller == null) return;
+
+            // Only the user themselves or an Admin can view this profile
+            boolean isSelf = caller.getUserID().toString().equals(userId);
+            boolean isAdmin = "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+            if (!isSelf && !isAdmin) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden\"}", 403);
+                return;
+            }
+
+            // Database-first: always query DB for latest data
             User u = null;
             if (api.userDAO != null) {
                 u = api.userDAO.findById(userId);
-            }
-            // Fallback to memory
-            if (u == null) {
+            } else {
+                // Memory fallback only if DB is unavailable
                 for (User mem : api.usersByEmail.values()) {
                     if (mem.getUserID().toString().equals(userId)) { u = mem; break; }
                 }
@@ -422,49 +589,107 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // Authenticate — Admin and Client can view consultants; Consultant can view too
+            User caller = api.authenticate(exchange, true);
+            if (caller == null) return;
+            String role = caller.getAccountType().toString();
+            if (!"Admin".equalsIgnoreCase(role) && !"Client".equalsIgnoreCase(role)
+                    && !"Consultant".equalsIgnoreCase(role)) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden\"}", 403);
+                return;
+            }
+
+            // FIX: Admin sees ALL (approved + pending); Client/Consultant only sees approved
+            boolean showOnlyApproved = !"Admin".equalsIgnoreCase(role);
             List<String> consultants = new ArrayList<>();
 
-            // Try to get from database first
+            // Database-first: always query DB for latest data
             if (api.userDAO != null) {
                 try {
                     List<Consultant> dbConsultants = api.userDAO.getAllConsultants();
                     for (Consultant c : dbConsultants) {
-                        // Only show approved consultants to clients
-                        if (c.isApproved()) {
-                            consultants.add("{\"userId\":\"" + c.getUserID() +
-                                "\",\"name\":\"" + c.getName() +
-                                "\",\"email\":\"" + c.getEmail() +
-                                "\",\"isApproved\":true}");
-                        }
+                        if (showOnlyApproved && !c.isApproved()) continue;
+                        consultants.add("{\"userId\":\"" + c.getUserID() +
+                            "\",\"name\":\"" + c.getName() +
+                            "\",\"email\":\"" + c.getEmail() +
+                            "\",\"isApproved\":" + c.isApproved() + "}");
                     }
+                    System.out.println("[GetConsultants] Fetched " + consultants.size() + " from DB");
                 } catch (Exception e) {
                     System.err.println("Error fetching consultants from DB: " + e.getMessage());
+                    e.printStackTrace();
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database error\"}", 500);
+                    return;
                 }
-            }
-
-            // Fallback to memory if DB returned nothing
-            if (consultants.isEmpty()) {
+            } else {
+                // Memory fallback only if DB is unavailable
                 for (User u : api.usersByEmail.values()) {
                     if (u instanceof Consultant) {
                         Consultant c = (Consultant) u;
-                        // Only show approved consultants to clients
-                        if (c.isApproved()) {
-                            consultants.add("{\"userId\":\"" + c.getUserID() +
-                                "\",\"name\":\"" + c.getName() +
-                                "\",\"email\":\"" + c.getEmail() +
-                                "\",\"isApproved\":true}");
-                        }
+                        if (showOnlyApproved && !c.isApproved()) continue;
+                        consultants.add("{\"userId\":\"" + c.getUserID() +
+                            "\",\"name\":\"" + c.getName() +
+                            "\",\"email\":\"" + c.getEmail() +
+                            "\",\"isApproved\":" + c.isApproved() + "}");
                     }
                 }
             }
 
-            // Add demo consultants if none exist
-            if (consultants.isEmpty()) {
-                consultants.add("{\"userId\":\"CONS-001\",\"name\":\"Dr. Sarah Johnson\",\"email\":\"sarah@example.com\",\"isApproved\":true}");
-                consultants.add("{\"userId\":\"CONS-002\",\"name\":\"Prof. Michael Chen\",\"email\":\"michael@example.com\",\"isApproved\":true}");
+            // Return whatever we found (empty array is a valid response)
+            api.sendResponse(exchange, "{\"success\":true,\"consultants\":[" + String.join(",", consultants) + "]}", 200);
+        }
+    }
+
+    /**
+     * Dedicated endpoint to list ALL pending (unapproved) consultants.
+     * Admin-only.
+     */
+    static class GetPendingConsultantsHandler implements HttpHandler {
+        private final ApiServer api;
+        public GetPendingConsultantsHandler(ApiServer api) { this.api = api; }
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            User caller = api.authenticate(exchange, true);
+            if (caller == null) return;
+            if (!"Admin".equalsIgnoreCase(caller.getAccountType().toString())) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden\"}", 403);
+                return;
             }
 
-            api.sendResponse(exchange, "{\"success\":true,\"consultants\":[" + String.join(",", consultants) + "]}", 200);
+            List<String> pending = new ArrayList<>();
+
+            // Database-first: always query DB for latest data
+            if (api.userDAO != null) {
+                try {
+                    List<Consultant> dbPending = api.userDAO.getPendingConsultants();
+                    for (Consultant c : dbPending) {
+                        pending.add("{\"userId\":\"" + c.getUserID() +
+                            "\",\"name\":\"" + (c.getName() != null ? c.getName() : "") +
+                            "\",\"email\":\"" + (c.getEmail() != null ? c.getEmail() : "") +
+                            "\",\"isApproved\":false}");
+                    }
+                    System.out.println("[GetPendingConsultants] Found " + pending.size() + " pending in DB");
+                } catch (Exception e) {
+                    System.err.println("Error fetching pending consultants from DB: " + e.getMessage());
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database error\"}", 500);
+                    return;
+                }
+            } else {
+                // Memory fallback only if DB is unavailable
+                for (User u : api.usersByEmail.values()) {
+                    if (u instanceof Consultant c && !c.isApproved()) {
+                        pending.add("{\"userId\":\"" + c.getUserID() +
+                            "\",\"name\":\"" + c.getName() +
+                            "\",\"email\":\"" + c.getEmail() +
+                            "\",\"isApproved\":false}");
+                    }
+                }
+            }
+
+            api.sendResponse(exchange,
+                "{\"success\":true,\"consultants\":[" + String.join(",", pending) + "]}",
+                200);
         }
     }
 
@@ -474,13 +699,41 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // Authenticate — Admin and Consultant can view clients
+            User caller = api.authenticate(exchange, true);
+            if (caller == null) return;
+            String role = caller.getAccountType().toString();
+            if (!"Admin".equalsIgnoreCase(role) && !"Consultant".equalsIgnoreCase(role)) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden: requires Admin or Consultant role\"}", 403);
+                return;
+            }
+
             List<String> clients = new ArrayList<>();
-            for (User u : api.usersByEmail.values()) {
-                if (u instanceof Client) {
-                    Client c = (Client) u;
-                    clients.add("{\"userId\":\"" + c.getUserID() +
-                        "\",\"name\":\"" + c.getName() +
-                        "\",\"email\":\"" + c.getEmail() + "\"}");
+
+            // Database-first: always query DB for latest data
+            if (api.userDAO != null) {
+                try {
+                    List<Client> dbClients = api.userDAO.getAllClients();
+                    for (Client c : dbClients) {
+                        clients.add("{\"userId\":\"" + c.getUserID() +
+                            "\",\"name\":\"" + (c.getName() != null ? c.getName() : "") +
+                            "\",\"email\":\"" + (c.getEmail() != null ? c.getEmail() : "") + "\"}");
+                    }
+                    System.out.println("[GetClients] Fetched " + clients.size() + " from DB");
+                } catch (Exception e) {
+                    System.err.println("Error fetching clients from DB: " + e.getMessage());
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database error\"}", 500);
+                    return;
+                }
+            } else {
+                // Memory fallback only if DB is unavailable
+                for (User u : api.usersByEmail.values()) {
+                    if (u instanceof Client) {
+                        Client c = (Client) u;
+                        clients.add("{\"userId\":\"" + c.getUserID() +
+                            "\",\"name\":\"" + c.getName() +
+                            "\",\"email\":\"" + c.getEmail() + "\"}");
+                    }
                 }
             }
 
@@ -494,27 +747,46 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // Authenticate — Admin only
+            User caller = api.authenticate(exchange, true);
+            if (caller == null) return;
+            if (!"Admin".equalsIgnoreCase(caller.getAccountType().toString())) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden: requires Admin role\"}", 403);
+                return;
+            }
+
             String body = api.readRequestBody(exchange);
+            System.out.println("[ApproveConsultant] raw body: " + body);
             Map<String, String> data = api.parseJsonBody(body);
+            System.out.println("[ApproveConsultant] parsed data: " + data);
 
             // Support both consultantId and email
             String consultantId = data.get("consultantId");
             String email = data.get("email");
 
-            // Find and approve consultant
-            for (User u : api.usersByEmail.values()) {
-                if (u instanceof Consultant) {
-                    boolean match = (consultantId != null && u.getUserID().toString().equals(consultantId))
-                                 || (email != null && u.getEmail().equals(email));
-                    if (match) {
-                        ((Consultant) u).setApproved(true);
-                        // Update in database
-                        if (api.userDAO != null) {
-                            api.userDAO.updateApprovalStatus(u.getUserID().toString(), true);
-                        }
+            // Database-first: lookup and update directly in DB
+            if (api.userDAO != null) {
+                Consultant c = null;
+                if (consultantId != null) {
+                    System.out.println("[ApproveConsultant] Looking up by consultantId: " + consultantId);
+                    User u = api.userDAO.findById(consultantId);
+                    if (u instanceof Consultant) c = (Consultant) u;
+                } else if (email != null) {
+                    System.out.println("[ApproveConsultant] Looking up by email: " + email);
+                    User u = api.userDAO.findByEmail(email);
+                    if (u instanceof Consultant) c = (Consultant) u;
+                }
+                if (c != null) {
+                    boolean dbUpdated = api.userDAO.updateApprovalStatus(c.getUserID().toString(), true);
+                    System.out.println("[ApproveConsultant] DB update result: " + dbUpdated);
+                    if (dbUpdated) {
                         api.sendResponse(exchange, "{\"success\":true,\"message\":\"Consultant approved successfully\"}", 200);
-                        return;
+                    } else {
+                        api.sendResponse(exchange, "{\"success\":false,\"error\":\"Failed to update approval status in database\"}", 500);
                     }
+                    return;
+                } else {
+                    System.out.println("[ApproveConsultant] Consultant NOT found in DB");
                 }
             }
 
@@ -528,6 +800,14 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // Authenticate — Admin only
+            User caller = api.authenticate(exchange, true);
+            if (caller == null) return;
+            if (!"Admin".equalsIgnoreCase(caller.getAccountType().toString())) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden: requires Admin role\"}", 403);
+                return;
+            }
+
             String body = api.readRequestBody(exchange);
             Map<String, String> data = api.parseJsonBody(body);
 
@@ -535,16 +815,25 @@ public class ApiServer {
             String consultantId = data.get("consultantId");
             String email = data.get("email");
 
-            // Find and reject consultant
-            for (User u : api.usersByEmail.values()) {
-                if (u instanceof Consultant) {
-                    boolean match = (consultantId != null && u.getUserID().toString().equals(consultantId))
-                                 || (email != null && u.getEmail().equals(email));
-                    if (match) {
-                        ((Consultant) u).setApproved(false);
+            // Database-first: lookup and update directly in DB
+            if (api.userDAO != null) {
+                Consultant c = null;
+                if (consultantId != null) {
+                    User u = api.userDAO.findById(consultantId);
+                    if (u instanceof Consultant) c = (Consultant) u;
+                } else if (email != null) {
+                    User u = api.userDAO.findByEmail(email);
+                    if (u instanceof Consultant) c = (Consultant) u;
+                }
+                if (c != null) {
+                    boolean dbUpdated = api.userDAO.updateApprovalStatus(c.getUserID().toString(), false);
+                    if (dbUpdated) {
+                        System.out.println("Consultant rejected in DB: " + c.getEmail());
                         api.sendResponse(exchange, "{\"success\":true,\"message\":\"Consultant rejected successfully\"}", 200);
-                        return;
+                    } else {
+                        api.sendResponse(exchange, "{\"success\":false,\"error\":\"Failed to update rejection in database\"}", 500);
                     }
+                    return;
                 }
             }
 
@@ -558,9 +847,12 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // No auth required — services are public (any logged-in user can view)
+            User caller = api.authenticate(exchange, false); // don't require auth header
+
             List<String> serviceList = new ArrayList<>();
 
-            // Try to get from database first
+            // Database-first: always query DB for latest data
             if (api.serviceDAO != null) {
                 try {
                     List<backend.core.ConsultingService> dbServices = api.serviceDAO.getAllServices();
@@ -572,13 +864,14 @@ public class ApiServer {
                             ",\"durationMinutes\":" + s.getDurationMinutes() +
                             ",\"category\":\"" + s.getCategory() + "\"}");
                     }
+                    System.out.println("[GetServices] Fetched " + serviceList.size() + " from DB");
                 } catch (Exception e) {
                     System.err.println("Error fetching services from DB: " + e.getMessage());
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database error\"}", 500);
+                    return;
                 }
-            }
-
-            // Fallback to memory if DB returned nothing
-            if (serviceList.isEmpty()) {
+            } else {
+                // Memory fallback only if DB is unavailable
                 for (backend.core.ConsultingService s : api.services.values()) {
                     serviceList.add("{\"serviceId\":\"" + s.getServiceId() +
                         "\",\"name\":\"" + s.getName() +
@@ -599,6 +892,14 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // Authenticate — Admin only
+            User caller = api.authenticate(exchange, true);
+            if (caller == null) return;
+            if (!"Admin".equalsIgnoreCase(caller.getAccountType().toString())) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden: requires Admin role\"}", 403);
+                return;
+            }
+
             String body = api.readRequestBody(exchange);
             Map<String, String> data = api.parseJsonBody(body);
 
@@ -623,6 +924,7 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // Authenticate — Client only; rely on clientId in body as primary auth
             String body = api.readRequestBody(exchange);
             Map<String, String> data = api.parseJsonBody(body);
 
@@ -631,6 +933,20 @@ public class ApiServer {
             String serviceId = data.get("serviceId");
             String startTime = data.get("startTime");
 
+            if (clientId == null || clientId.isBlank()) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"clientId required\"}", 400);
+                return;
+            }
+
+            // Auth: verify caller matches clientId from body, or is Admin
+            User caller = api.authenticate(exchange, false);
+            boolean isAdmin = caller != null && "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+            boolean isSelf = caller != null && caller.getUserID().toString().equals(clientId);
+            if (!isAdmin && !isSelf) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden: cannot create booking for another user\"}", 403);
+                return;
+            }
+
             try {
                 // Find client
                 Client client = null;
@@ -638,34 +954,32 @@ public class ApiServer {
                 backend.core.ConsultingService service = null;
 
                 if (api.userDAO != null) {
-                    client = (Client) api.userDAO.findById(clientId);
-                    consultant = (Consultant) api.userDAO.findById(consultantId);
-                    service = api.serviceDAO.findById(UUID.fromString(serviceId));
-                }
-
-                // Fallback to memory if DB not available
-                if (client == null) {
-                    for (User u : api.usersByEmail.values()) {
-                        if (u instanceof Client && u.getUserID().toString().equals(clientId)) {
-                            client = (Client) u;
-                            break;
+                    User dbClient = api.userDAO.findById(clientId);
+                    System.out.println("CreateBooking: Looking up clientId=" + clientId + ", found=" + (dbClient != null ? dbClient.getClass().getSimpleName() : "null"));
+                    if (dbClient instanceof Client) {
+                        client = (Client) dbClient;
+                        // FIX: Use database userId so FK constraint matches
+                        clientId = client.getUserID().toString();
+                    }
+                    User dbConsultant = api.userDAO.findById(consultantId);
+                    if (dbConsultant instanceof Consultant) {
+                        consultant = (Consultant) dbConsultant;
+                        // FIX: Use database userId so FK constraint matches
+                        consultantId = consultant.getUserID().toString();
+                    }
+                    if (serviceId != null) {
+                        try {
+                            service = api.serviceDAO.findById(UUID.fromString(serviceId));
+                        } catch (Exception e) {
+                            System.err.println("CreateBooking: serviceId lookup failed: " + e.getMessage());
                         }
                     }
                 }
-                if (consultant == null) {
-                    for (User u : api.usersByEmail.values()) {
-                        if (u instanceof Consultant && u.getUserID().toString().equals(consultantId)) {
-                            consultant = (Consultant) u;
-                            break;
-                        }
-                    }
-                }
-                if (service == null) {
-                    service = api.services.values().stream().findFirst().orElse(null);
-                }
 
+                // Database required — no fallback to memory
                 if (client == null || consultant == null || service == null) {
-                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Invalid client, consultant or service\"}", 400);
+                    String missing = client == null ? "client" : (consultant == null ? "consultant" : "service");
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"" + missing + " not found in database\"}", 400);
                     return;
                 }
 
@@ -679,15 +993,29 @@ public class ApiServer {
                     java.time.LocalDateTime.parse(startTime.replace(" ", "T")) :
                     java.time.LocalDateTime.now().plusDays(1);
 
+                // Server-side availability check: verify consultant has an available slot covering this time
+                if (api.availabilityDAO != null) {
+                    boolean available = api.availabilityDAO.isAvailable(
+                        consultantId, start, start.plusMinutes(service.getDurationMinutes()));
+                    if (!available) {
+                        api.sendResponse(exchange,
+                            "{\"success\":false,\"error\":\"Consultant is not available at the requested time. Please check their availability schedule.\"}",
+                            400);
+                        return;
+                    }
+                    System.out.println("CreateBooking: availability verified for consultant " + consultantId + " at " + start);
+                }
+
                 Booking booking = new Booking(client, consultant, service, start);
                 booking.setStatus(BookingStatus.Requested);
 
-                // Save to database
+                // Save to database (required)
                 if (api.bookingDAO != null) {
                     api.bookingDAO.insert(booking);
+                } else {
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database not available\"}", 500);
+                    return;
                 }
-
-                api.bookings.put(booking.getBookingId(), booking);
 
                 api.sendResponse(exchange, "{\"success\":true,\"bookingId\":\"" + booking.getBookingId() +
                     "\",\"status\":\"Requested\",\"message\":\"Booking created successfully\"}", 200);
@@ -707,9 +1035,25 @@ public class ApiServer {
             String clientId = query != null && query.contains("clientId=") ?
                 query.split("clientId=")[1].split("&")[0] : null;
 
+            if (clientId == null || clientId.isBlank()) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"clientId required\"}", 400);
+                return;
+            }
+
+            // Authenticate caller — don't fail hard if header is missing (clientId in query is primary auth)
+            User caller = api.authenticate(exchange, false);
+            boolean isAdmin = caller != null && "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+            boolean isSelf = caller != null && caller.getUserID().toString().equals(clientId);
+
+            // Client can only view their own bookings; Admin can view all
+            if (!isAdmin && !isSelf) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden\"}", 403);
+                return;
+            }
+
             List<String> bookingList = new ArrayList<>();
 
-            // Try database first
+            // Database-first: always query DB for latest data
             if (api.bookingDAO != null && clientId != null) {
                 try {
                     List<Booking> dbBookings = api.bookingDAO.findByClientId(clientId);
@@ -721,15 +1065,16 @@ public class ApiServer {
                             "\",\"startTime\":\"" + b.getStartTime() +
                             "\",\"status\":\"" + b.getStatus() + "\"}");
                     }
+                    System.out.println("[GetClientBookings] Fetched " + bookingList.size() + " from DB for clientId=" + clientId);
                 } catch (Exception e) {
                     System.err.println("Error fetching client bookings from DB: " + e.getMessage());
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database error\"}", 500);
+                    return;
                 }
-            }
-
-            // Fallback to memory
-            if (bookingList.isEmpty()) {
+            } else {
+                // Memory fallback only if DB is unavailable
                 for (Booking b : api.bookings.values()) {
-                    if (clientId == null || b.getClient().getUserID().toString().equals(clientId)) {
+                    if (b.getClient().getUserID().toString().equals(clientId)) {
                         bookingList.add("{\"bookingId\":\"" + b.getBookingId() +
                             "\",\"clientName\":\"" + b.getClient().getName() +
                             "\",\"consultantName\":\"" + b.getConsultant().getName() +
@@ -754,9 +1099,25 @@ public class ApiServer {
             String consultantId = query != null && query.contains("consultantId=") ?
                 query.split("consultantId=")[1].split("&")[0] : null;
 
+            if (consultantId == null || consultantId.isBlank()) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"consultantId required\"}", 400);
+                return;
+            }
+
+            // Authenticate caller — don't fail hard if header is missing (consultantId in query is primary auth)
+            User caller = api.authenticate(exchange, false);
+            boolean isAdmin = caller != null && "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+            boolean isSelf = caller != null && caller.getUserID().toString().equals(consultantId);
+
+            // Consultant can only view their own bookings; Admin can view all
+            if (!isAdmin && !isSelf) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden\"}", 403);
+                return;
+            }
+
             List<String> bookingList = new ArrayList<>();
 
-            // Try database first
+            // Database-first: always query DB for latest data
             if (api.bookingDAO != null && consultantId != null) {
                 try {
                     List<Booking> dbBookings = api.bookingDAO.findByConsultantId(consultantId);
@@ -767,15 +1128,16 @@ public class ApiServer {
                             "\",\"startTime\":\"" + b.getStartTime() +
                             "\",\"status\":\"" + b.getStatus() + "\"}");
                     }
+                    System.out.println("[GetConsultantBookings] Fetched " + bookingList.size() + " from DB for consultantId=" + consultantId);
                 } catch (Exception e) {
                     System.err.println("Error fetching consultant bookings from DB: " + e.getMessage());
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database error\"}", 500);
+                    return;
                 }
-            }
-
-            // Fallback to memory
-            if (bookingList.isEmpty()) {
+            } else {
+                // Memory fallback only if DB is unavailable
                 for (Booking b : api.bookings.values()) {
-                    if (consultantId == null || b.getConsultant().getUserID().toString().equals(consultantId)) {
+                    if (b.getConsultant().getUserID().toString().equals(consultantId)) {
                         bookingList.add("{\"bookingId\":\"" + b.getBookingId() +
                             "\",\"clientName\":\"" + b.getClient().getName() +
                             "\",\"serviceName\":\"" + b.getService().getName() +
@@ -795,35 +1157,59 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // Prefer consultantId from request body for ownership verification
             String body = api.readRequestBody(exchange);
             Map<String, String> data = api.parseJsonBody(body);
             String bookingId = data.get("bookingId");
+            String consultantId = data.get("consultantId"); // from request body
 
-            // Try database first
-            if (api.bookingDAO != null && bookingId != null) {
-                try {
-                    Booking b = api.bookingDAO.findById(UUID.fromString(bookingId));
-                    if (b != null) {
-                        b.confirm();
-                        api.bookingDAO.update(b);
-                        api.sendResponse(exchange, "{\"success\":true,\"message\":\"Booking confirmed successfully\"}", 200);
-                        return;
-                    }
-                } catch (Exception e) {
-                    System.err.println("DB confirm error: " + e.getMessage());
-                }
+            if (bookingId == null) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"bookingId required\"}", 400);
+                return;
             }
 
-            // Fallback to memory
-            for (Booking b : api.bookings.values()) {
-                if (b.getBookingId().toString().equals(bookingId)) {
-                    b.confirm();
-                    api.sendResponse(exchange, "{\"success\":true,\"message\":\"Booking confirmed successfully\"}", 200);
+            // Database required
+            if (api.bookingDAO == null) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database not available\"}", 500);
+                return;
+            }
+            try {
+                Booking b = api.bookingDAO.findById(UUID.fromString(bookingId.trim()));
+                if (b == null) {
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Booking not found in database\"}", 404);
                     return;
                 }
-            }
 
-            api.sendResponse(exchange, "{\"success\":false,\"error\":\"Booking not found\"}", 404);
+                // Auth: verify the caller owns this booking
+                // Try Authorization header first (exact userId lookup), fall back to request-body consultantId
+                User caller = api.authenticate(exchange, false); // don't require auth header
+                boolean isAdmin = caller != null && "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+                boolean isOwner = false;
+
+                if (isAdmin) {
+                    isOwner = true;
+                } else if (consultantId != null && !consultantId.isBlank()) {
+                    // Primary auth: match consultantId from request body
+                    isOwner = b.getConsultant().getUserID().toString().equals(consultantId);
+                } else if (caller != null) {
+                    // Fallback: match Authorization header userId
+                    isOwner = b.getConsultant().getUserID().toString().equals(caller.getUserID().toString());
+                }
+
+                if (!isOwner) {
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden: you do not own this booking\"}", 403);
+                    return;
+                }
+
+                b.confirm();
+                api.bookingDAO.update(b);
+                api.sendResponse(exchange, "{\"success\":true,\"message\":\"Booking confirmed successfully\"}", 200);
+            } catch (IllegalStateException e) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"" + e.getMessage() + "\"}", 400);
+            } catch (Exception e) {
+                System.err.println("DB confirm error: " + e.getMessage());
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"" + e.getMessage() + "\"}", 500);
+            }
         }
     }
 
@@ -836,37 +1222,54 @@ public class ApiServer {
             String body = api.readRequestBody(exchange);
             Map<String, String> data = api.parseJsonBody(body);
             String bookingId = data.get("bookingId");
+            String clientId = data.get("clientId"); // from request body
 
-            // Try database first
-            if (api.bookingDAO != null && bookingId != null) {
-                try {
-                    Booking b = api.bookingDAO.findById(UUID.fromString(bookingId));
-                    if (b != null) {
-                        b.cancel();
-                        api.bookingDAO.update(b);
-                        api.sendResponse(exchange, "{\"success\":true,\"message\":\"Booking cancelled successfully\"}", 200);
-                        return;
-                    }
-                } catch (Exception e) {
-                    System.err.println("DB cancel error: " + e.getMessage());
-                }
+            if (bookingId == null) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"bookingId required\"}", 400);
+                return;
             }
 
-            // Fallback to memory
-            for (Booking b : api.bookings.values()) {
-                if (b.getBookingId().toString().equals(bookingId)) {
-                    try {
-                        b.cancel();
-                        api.sendResponse(exchange, "{\"success\":true,\"message\":\"Booking cancelled successfully\"}", 200);
-                        return;
-                    } catch (IllegalStateException e) {
-                        api.sendResponse(exchange, "{\"success\":false,\"error\":\"" + e.getMessage() + "\"}", 400);
-                        return;
-                    }
-                }
+            // Database required
+            if (api.bookingDAO == null) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database not available\"}", 500);
+                return;
             }
+            try {
+                Booking b = api.bookingDAO.findById(UUID.fromString(bookingId.trim()));
+                if (b == null) {
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Booking not found\"}", 404);
+                    return;
+                }
 
-            api.sendResponse(exchange, "{\"success\":false,\"error\":\"Booking not found\"}", 404);
+                // Auth: verify ownership via request body clientId or Authorization header
+                User caller = api.authenticate(exchange, false);
+                boolean isAdmin = caller != null && "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+                boolean isOwner = false;
+
+                if (isAdmin) {
+                    isOwner = true;
+                } else if (clientId != null && !clientId.isBlank()) {
+                    // Primary auth: match clientId from request body
+                    isOwner = b.getClient().getUserID().toString().equals(clientId);
+                } else if (caller != null) {
+                    // Fallback: match Authorization header userId
+                    isOwner = b.getClient().getUserID().toString().equals(caller.getUserID().toString());
+                }
+
+                if (!isOwner) {
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden: you do not own this booking\"}", 403);
+                    return;
+                }
+
+                b.cancel();
+                api.bookingDAO.update(b);
+                api.sendResponse(exchange, "{\"success\":true,\"message\":\"Booking cancelled successfully\"}", 200);
+            } catch (IllegalStateException e) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"" + e.getMessage() + "\"}", 400);
+            } catch (Exception e) {
+                System.err.println("DB cancel error: " + e.getMessage());
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"" + e.getMessage() + "\"}", 500);
+            }
         }
     }
 
@@ -876,35 +1279,128 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // Prefer consultantId from request body for ownership verification
             String body = api.readRequestBody(exchange);
             Map<String, String> data = api.parseJsonBody(body);
             String bookingId = data.get("bookingId");
+            String consultantId = data.get("consultantId"); // from request body
 
-            // Try database first
-            if (api.bookingDAO != null && bookingId != null) {
-                try {
-                    Booking b = api.bookingDAO.findById(UUID.fromString(bookingId));
-                    if (b != null) {
-                        b.complete();
-                        api.bookingDAO.update(b);
-                        api.sendResponse(exchange, "{\"success\":true,\"message\":\"Booking completed successfully\"}", 200);
-                        return;
-                    }
-                } catch (Exception e) {
-                    System.err.println("DB complete error: " + e.getMessage());
-                }
+            if (bookingId == null) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"bookingId required\"}", 400);
+                return;
             }
 
-            // Fallback to memory
-            for (Booking b : api.bookings.values()) {
-                if (b.getBookingId().toString().equals(bookingId)) {
-                    b.complete();
-                    api.sendResponse(exchange, "{\"success\":true,\"message\":\"Booking completed successfully\"}", 200);
+            // Database required
+            if (api.bookingDAO == null) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database not available\"}", 500);
+                return;
+            }
+            try {
+                System.out.println("[CompleteBooking] raw bookingId='" + bookingId + "' (len=" + (bookingId != null ? bookingId.length() : 0) + ")");
+                System.out.println("[CompleteBooking] raw consultantId='" + consultantId + "'");
+                System.out.println("[CompleteBooking] raw body='" + body + "'");
+                Booking b = api.bookingDAO.findById(UUID.fromString(bookingId.trim()));
+                System.out.println("[CompleteBooking] loaded booking=" + (b != null ? b.getBookingId() : "null"));
+                if (b == null) {
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Booking not found in database\"}", 404);
                     return;
                 }
+
+                // Auth: verify the caller owns this booking
+                User caller = api.authenticate(exchange, false); // don't require auth header
+                boolean isAdmin = caller != null && "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+                boolean isOwner = false;
+
+                if (isAdmin) {
+                    isOwner = true;
+                } else if (consultantId != null && !consultantId.isBlank()) {
+                    // Primary auth: match consultantId from request body
+                    isOwner = b.getConsultant().getUserID().toString().equals(consultantId);
+                    System.out.println("[CompleteBooking] isOwner via consultantId=" + isOwner + " (consultantId=" + consultantId + " vs b.consultant=" + b.getConsultant().getUserID() + ")");
+                } else if (caller != null) {
+                    // Fallback: match Authorization header userId
+                    isOwner = b.getConsultant().getUserID().toString().equals(caller.getUserID().toString());
+                    System.out.println("[CompleteBooking] isOwner via caller=" + isOwner + " (caller=" + caller.getUserID() + " vs b.consultant=" + b.getConsultant().getUserID() + ")");
+                }
+
+                if (!isOwner) {
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden: you do not own this booking\"}", 403);
+                    return;
+                }
+
+                b.complete();
+                api.bookingDAO.update(b);
+                api.sendResponse(exchange, "{\"success\":true,\"message\":\"Booking completed successfully\"}", 200);
+            } catch (IllegalStateException e) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"" + e.getMessage() + "\"}", 400);
+            } catch (Exception e) {
+                System.err.println("DB complete error: " + e.getMessage());
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"" + e.getMessage() + "\"}", 500);
+            }
+        }
+    }
+
+    /**
+     * Handler for consultant rejecting a booking.
+     * Maps to POST /api/bookings/reject
+     */
+    static class RejectBookingHandler implements HttpHandler {
+        private final ApiServer api;
+        public RejectBookingHandler(ApiServer api) { this.api = api; }
+
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            String body = api.readRequestBody(exchange);
+            Map<String, String> data = api.parseJsonBody(body);
+            String bookingId = data.get("bookingId");
+            String consultantId = data.get("consultantId"); // from request body
+
+            if (bookingId == null) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"bookingId required\"}", 400);
+                return;
             }
 
-            api.sendResponse(exchange, "{\"success\":false,\"error\":\"Booking not found\"}", 404);
+            if (api.bookingDAO == null) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database not available\"}", 500);
+                return;
+            }
+            try {
+                System.out.println("[RejectBooking] raw bookingId='" + bookingId + "' (len=" + (bookingId != null ? bookingId.length() : 0) + ")");
+                System.out.println("[RejectBooking] raw body='" + body + "'");
+                Booking b = api.bookingDAO.findById(UUID.fromString(bookingId.trim()));
+                System.out.println("[RejectBooking] loaded booking=" + (b != null ? b.getBookingId() : "null"));
+                if (b == null) {
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Booking not found in database\"}", 404);
+                    return;
+                }
+
+                // Auth: verify ownership via request body consultantId or Authorization header
+                User caller = api.authenticate(exchange, false);
+                boolean isAdmin = caller != null && "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+                boolean isOwner = false;
+
+                if (isAdmin) {
+                    isOwner = true;
+                } else if (consultantId != null && !consultantId.isBlank()) {
+                    isOwner = b.getConsultant().getUserID().toString().equals(consultantId);
+                } else if (caller != null) {
+                    isOwner = b.getConsultant().getUserID().toString().equals(caller.getUserID().toString());
+                }
+
+                if (!isOwner) {
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden: you do not own this booking\"}", 403);
+                    return;
+                }
+
+                b.reject();
+                api.bookingDAO.update(b);
+                api.sendResponse(exchange, "{\"success\":true,\"message\":\"Booking rejected successfully\"}", 200);
+            } catch (IllegalStateException e) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"" + e.getMessage() + "\"}", 400);
+            } catch (Exception e) {
+                System.err.println("DB reject error: " + e.getMessage());
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"" + e.getMessage() + "\"}", 500);
+            }
         }
     }
 
@@ -914,54 +1410,160 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
-            try {
-                String body = api.readRequestBody(exchange);
-                Map<String, String> data = api.parseJsonBody(body);
-                String bookingId = data.get("bookingId");
-                String paymentMethod = data.getOrDefault("paymentMethod", "CreditCard");
-                double amount = Double.parseDouble(data.getOrDefault("amount", "100"));
+            // Auth: rely on clientId in body as primary auth
+            String body = api.readRequestBody(exchange);
+            Map<String, String> data = api.parseJsonBody(body);
+            String bookingId = data.get("bookingId");
+            String clientId = data.get("clientId");
+            String methodId = data.get("methodId");   // selected from saved payment methods
+            String paymentType = data.get("paymentType"); // used when adding a new method inline
 
-                PaymentMethod method = PaymentMethod.valueOf(paymentMethod);
-                PaymentTransaction transaction = new PaymentTransaction(amount, method, "****1234");
+            if (bookingId == null || bookingId.isBlank()) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"bookingId required\"}", 400);
+                return;
+            }
+            if (clientId == null || clientId.isBlank()) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"clientId required\"}", 400);
+                return;
+            }
+
+            // Auth: verify caller matches clientId from body, or is Admin
+            User caller = api.authenticate(exchange, false);
+            boolean isAdmin = caller != null && "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+            boolean isSelf = caller != null && caller.getUserID().toString().equals(clientId);
+            if (!isAdmin && !isSelf) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden\"}", 403);
+                return;
+            }
+
+            // ① Load booking from DB to get amount and verify ownership
+            Booking targetBooking = null;
+            double amount = 0;
+            if (api.bookingDAO != null) {
+                try {
+                    targetBooking = api.bookingDAO.findById(UUID.fromString(bookingId.trim()));
+                } catch (Exception e) {
+                    System.err.println("[MakePayment] booking lookup error: " + e.getMessage());
+                }
+            }
+            if (targetBooking == null) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Booking not found in database\"}", 404);
+                return;
+            }
+            if (!targetBooking.getClient().getUserID().toString().equals(clientId) && !isAdmin) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden: booking does not belong to this client\"}", 403);
+                return;
+            }
+
+            // Get amount from booking's service (not from request body — prevents manipulation)
+            try {
+                amount = targetBooking.getService().getBasePrice();
+            } catch (Exception e) {
+                System.err.println("[MakePayment] could not get service price: " + e.getMessage());
+                amount = Double.parseDouble(data.getOrDefault("amount", "0"));
+            }
+
+            // ② Resolve payment method: if methodId provided, validate it belongs to this client
+            String resolvedMethodId = null;
+            String resolvedPaymentType = null;
+            String maskedDetails = "****";
+
+            if (methodId != null && !methodId.isBlank()) {
+                // Validate: methodId must belong to this client
+                if (api.paymentMethodDAO != null) {
+                    List<Map<String, String>> savedMethods = api.paymentMethodDAO.findByClientId(clientId);
+                    for (Map<String, String> m : savedMethods) {
+                        if (methodId.equals(m.get("methodId"))) {
+                            resolvedMethodId = methodId;
+                            resolvedPaymentType = m.get("paymentType");
+                            maskedDetails = m.get("details");
+                            break;
+                        }
+                    }
+                    if (resolvedMethodId == null) {
+                        api.sendResponse(exchange,
+                            "{\"success\":false,\"error\":\"Payment method not found or does not belong to this client\"}",
+                            400);
+                        return;
+                    }
+                }
+            } else if (paymentType != null && !paymentType.isBlank()) {
+                // No saved method — add a new one inline for this payment
+                String details = data.getOrDefault("details", "****");
+                if (api.paymentMethodDAO != null) {
+                    resolvedMethodId = api.paymentMethodDAO.insert(clientId, paymentType, details);
+                    resolvedPaymentType = paymentType;
+                    maskedDetails = details;
+                    if (resolvedMethodId == null || resolvedMethodId.isEmpty()) {
+                        api.sendResponse(exchange,
+                            "{\"success\":false,\"error\":\"Failed to save payment method\"}",
+                            500);
+                        return;
+                    }
+                    System.out.println("[MakePayment] Added new payment method id=" + resolvedMethodId);
+                }
+            } else {
+                // Neither methodId nor paymentType provided — return saved methods so client can pick one
+                if (api.paymentMethodDAO != null) {
+                    List<Map<String, String>> savedMethods = api.paymentMethodDAO.findByClientId(clientId);
+                    List<String> methodList = new ArrayList<>();
+                    for (Map<String, String> m : savedMethods) {
+                        methodList.add("{\"methodId\":\"" + m.get("methodId") +
+                            "\",\"paymentType\":\"" + m.get("paymentType") +
+                            "\",\"details\":\"" + safeJson(m.get("details")) + "\"}");
+                    }
+                    if (methodList.isEmpty()) {
+                        api.sendResponse(exchange,
+                            "{\"success\":false,\"error\":\"No saved payment methods — please add one first\",\"needsPaymentMethod\":true}",
+                            400);
+                    } else {
+                        api.sendResponse(exchange,
+                            "{\"success\":false,\"error\":\"Please select a saved payment method\",\"methods\":[" + String.join(",", methodList) + "],\"bookingAmount\":" + amount + "}",
+                            400);
+                    }
+                } else {
+                    api.sendResponse(exchange,
+                        "{\"success\":false,\"error\":\"No payment method provided\"}",
+                        400);
+                }
+                return;
+            }
+
+            // ③ Process payment
+            try {
+                PaymentMethod pm = PaymentMethod.valueOf(resolvedPaymentType != null ? resolvedPaymentType : "CreditCard");
+                PaymentTransaction transaction = new PaymentTransaction(amount, pm, maskedDetails);
                 transaction.succeed();
 
-                // Update booking in database
-                if (api.bookingDAO != null && bookingId != null) {
-                    try {
-                        Booking b = api.bookingDAO.findById(UUID.fromString(bookingId));
-                        if (b != null) {
-                            b.markPaid();
-                            api.bookingDAO.update(b);
-                        }
-                    } catch (Exception e) {
-                        System.err.println("DB payment update error: " + e.getMessage());
-                    }
-                }
+                // Update booking status to Paid
+                targetBooking.markPaid();
+                api.bookingDAO.update(targetBooking);
+                System.out.println("[MakePayment] Booking " + bookingId + " marked as Paid");
 
-                // Also update in memory
-                for (Booking b : api.bookings.values()) {
-                    if (b.getBookingId().toString().equals(bookingId)) {
-                        b.markPaid();
-                        break;
-                    }
-                }
-
-                // Save payment to database
+                // Save payment record with methodId
                 if (api.paymentDAO != null) {
                     try {
-                        UUID bookingUUID = bookingId != null ? UUID.fromString(bookingId) : null;
-                        api.paymentDAO.insert(transaction, bookingUUID);
+                        boolean saved = api.paymentDAO.insert(transaction,
+                            UUID.fromString(bookingId.trim()),
+                            resolvedMethodId);
+                        System.out.println("[MakePayment] Payment record saved: " + saved);
                     } catch (Exception e) {
-                        System.err.println("DB payment insert error: " + e.getMessage());
+                        System.err.println("[MakePayment] payment DAO insert error: " + e.getMessage());
                     }
                 }
-                api.payments.put(transaction.getTransactionId().toString(), transaction);
 
-                api.sendResponse(exchange, "{\"success\":true,\"paymentId\":\"" + transaction.getTransactionId() +
-                    "\",\"status\":\"SUCCESS\",\"message\":\"Payment processed successfully\"}", 200);
+                api.sendResponse(exchange,
+                    "{\"success\":true,\"paymentId\":\"" + transaction.getTransactionId() +
+                    "\",\"amount\":" + amount +
+                    ",\"paymentMethod\":\"" + resolvedPaymentType +
+                    "\",\"status\":\"SUCCESS\",\"message\":\"Payment processed successfully\"}",
+                    200);
+
             } catch (Exception e) {
                 System.err.println("Payment error: " + e.getMessage());
-                api.sendResponse(exchange, "{\"success\":false,\"error\":\"" + e.getMessage() + "\"}", 500);
+                api.sendResponse(exchange,
+                    "{\"success\":false,\"error\":\"" + e.getMessage() + "\"}",
+                    500);
             }
         }
     }
@@ -976,9 +1578,23 @@ public class ApiServer {
             String clientId = query != null && query.contains("clientId=") ?
                 query.split("clientId=")[1].split("&")[0] : null;
 
+            if (clientId == null || clientId.isBlank()) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"clientId required\"}", 400);
+                return;
+            }
+
+            // Auth: body clientId is primary, auth header is fallback
+            User caller = api.authenticate(exchange, false);
+            boolean isAdmin = caller != null && "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+            boolean isSelf = caller != null && caller.getUserID().toString().equals(clientId);
+            if (!isAdmin && !isSelf) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden\"}", 403);
+                return;
+            }
+
             List<String> paymentList = new ArrayList<>();
 
-            // Try database first
+            // Database-first: always query DB for latest data
             if (api.paymentDAO != null && clientId != null) {
                 try {
                     List<PaymentTransaction> dbPayments = api.paymentDAO.findByUserId(clientId);
@@ -986,20 +1602,12 @@ public class ApiServer {
                         paymentList.add("{\"paymentId\":\"" + t.getTransactionId() +
                             "\",\"amount\":" + t.getAmount() +
                             ",\"paymentMethod\":\"" + t.getPaymentMethod() +
-                            "\",\"status\":\"" + t.getStatus() + "\"}");
+                            ",\"status\":\"" + t.getStatus() + "\"}");
                     }
                 } catch (Exception e) {
                     System.err.println("Error fetching payment history from DB: " + e.getMessage());
-                }
-            }
-
-            // Fallback to memory
-            if (paymentList.isEmpty()) {
-                for (PaymentTransaction t : api.payments.values()) {
-                    paymentList.add("{\"paymentId\":\"" + t.getTransactionId() +
-                        "\",\"amount\":" + t.getAmount() +
-                        ",\"paymentMethod\":\"" + t.getPaymentMethod() +
-                        "\",\"status\":\"" + t.getStatus() + "\"}");
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database error\"}", 500);
+                    return;
                 }
             }
 
@@ -1020,68 +1628,64 @@ public class ApiServer {
             String paymentType = data.get("paymentType");
             String maskedDetails = data.get("maskedDetails");
 
-            if (clientId == null || paymentType == null) {
-                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Missing required fields\"}", 400);
+            if (clientId == null || clientId.isBlank()) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"clientId required\"}", 400);
+                return;
+            }
+            if (paymentType == null || paymentType.isBlank()) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"paymentType required\"}", 400);
                 return;
             }
 
-            System.out.println("Adding payment method for client: " + clientId + ", type: " + paymentType);
+            // Auth: verify caller matches clientId from body, or is Admin
+            User caller = api.authenticate(exchange, false);
+            boolean isAdmin = caller != null && "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+            boolean isSelf = caller != null && caller.getUserID().toString().equals(clientId);
+            if (!isAdmin && !isSelf) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden\"}", 403);
+                return;
+            }
 
-            // Ensure client exists in database first
+            // Resolve clientId from DB to get the real user_id
+            String resolvedClientId = clientId;
             if (api.userDAO != null) {
                 try {
                     backend.user.User existingClient = api.userDAO.findById(clientId);
-                    if (existingClient == null) {
-                        System.out.println("Client not found in DB, checking memory...");
-                        // Try to find client in memory first
-                        backend.user.Client memoryClient = null;
-                        for (User u : api.usersByEmail.values()) {
-                            if (u instanceof backend.user.Client && u.getUserID().toString().equals(clientId)) {
-                                memoryClient = (backend.user.Client) u;
-                                break;
-                            }
-                        }
-                        
-                        if (memoryClient != null) {
-                            // Found in memory, save to database
-                            boolean created = api.userDAO.insert(memoryClient);
-                            if (created) {
-                                System.out.println("Client created in database successfully from memory");
-                            } else {
-                                System.err.println("Failed to create client in database");
-                            }
-                        } else {
-                            System.err.println("Client not found in memory either. Cannot create payment method.");
-                            api.sendResponse(exchange, "{\"success\":false,\"error\":\"Client not found\"}", 404);
-                            return;
-                        }
+                    if (existingClient != null) {
+                        resolvedClientId = existingClient.getUserID().toString();
+                    } else {
+                        api.sendResponse(exchange, "{\"success\":false,\"error\":\"Client not found in database\"}", 404);
+                        return;
                     }
                 } catch (Exception e) {
-                    System.err.println("Error ensuring client exists: " + e.getMessage());
-                    e.printStackTrace();
+                    System.err.println("Error resolving client: " + e.getMessage());
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database error\"}", 500);
+                    return;
                 }
             }
 
-            // Try database first
+            // Insert payment method into database
             if (api.paymentMethodDAO != null) {
                 try {
-                    String methodId = api.paymentMethodDAO.insert(clientId, paymentType, maskedDetails != null ? maskedDetails : "");
+                    String methodId = api.paymentMethodDAO.insert(
+                        resolvedClientId,
+                        paymentType,
+                        maskedDetails != null ? maskedDetails : "");
                     if (methodId != null && !methodId.isEmpty()) {
-                        System.out.println("Payment method saved to database successfully! Method ID: " + methodId);
-                        api.sendResponse(exchange, "{\"success\":true,\"methodId\":\"" + methodId + "\",\"message\":\"Payment method added successfully\"}", 200);
+                        System.out.println("[AddPaymentMethod] Saved methodId=" + methodId + " for clientId=" + resolvedClientId);
+                        api.sendResponse(exchange,
+                            "{\"success\":true,\"methodId\":\"" + methodId +
+                            "\",\"paymentType\":\"" + paymentType +
+                            "\",\"details\":\"" + (maskedDetails != null ? maskedDetails : "****") +
+                            "\",\"message\":\"Payment method added successfully\"}",
+                            200);
                         return;
-                    } else {
-                        System.err.println("Payment method insert returned null or empty methodId");
                     }
                 } catch (Exception e) {
-                    System.err.println("Error saving payment method to database: " + e.getMessage());
-                    e.printStackTrace();
+                    System.err.println("Error saving payment method: " + e.getMessage());
                 }
-            } else {
-                System.err.println("PaymentMethodDAO is null - database not initialized");
             }
 
-            // Fallback response
             api.sendResponse(exchange, "{\"success\":false,\"error\":\"Failed to save payment method to database\"}", 500);
         }
     }
@@ -1096,19 +1700,33 @@ public class ApiServer {
             String clientId = query != null && query.contains("clientId=") ?
                 query.split("clientId=")[1].split("&")[0] : null;
 
-            if (clientId == null) {
+            if (clientId == null || clientId.isBlank()) {
                 api.sendResponse(exchange, "{\"success\":false,\"error\":\"clientId required\"}", 400);
+                return;
+            }
+
+            // Auth: body consultantId is primary, auth header is fallback
+            User caller = api.authenticate(exchange, false);
+            boolean isAdmin = caller != null && "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+            boolean isSelf = caller != null && caller.getUserID().toString().equals(clientId);
+            if (!isAdmin && !isSelf) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden\"}", 403);
                 return;
             }
 
             List<String> methodList = new ArrayList<>();
 
             if (api.paymentMethodDAO != null) {
+                // NOTE: DAO returns Map with keys: methodId, paymentType, details
                 List<Map<String, String>> methods = api.paymentMethodDAO.findByClientId(clientId);
+                System.out.println("[ListPaymentMethods] Found " + methods.size() + " methods for clientId=" + clientId);
                 for (Map<String, String> m : methods) {
-                    methodList.add("{\"methodId\":\"" + m.get("methodId") +
-                        "\",\"paymentType\":\"" + m.get("paymentType") +
-                        "\",\"details\":\"" + m.get("details") + "\"}");
+                    String methodId = safeJson(m.get("methodId"));
+                    String paymentType = safeJson(m.get("paymentType"));
+                    String details = safeJson(m.get("details"));
+                    methodList.add("{\"methodId\":" + methodId +
+                        ",\"paymentType\":" + paymentType +
+                        ",\"details\":" + details + "}");
                 }
             }
 
@@ -1122,20 +1740,35 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // Read body before auth (body read does not consume anything on HttpExchange)
             String body = api.readRequestBody(exchange);
             Map<String, String> data = api.parseJsonBody(body);
 
             String methodId = data.get("methodId");
             String clientId = data.get("clientId");
 
-            if (methodId == null || clientId == null) {
-                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Missing methodId or clientId\"}", 400);
+            if (methodId == null || methodId.isBlank()) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"methodId required\"}", 400);
+                return;
+            }
+            if (clientId == null || clientId.isBlank()) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"clientId required\"}", 400);
+                return;
+            }
+
+            // Auth: body clientId is primary, auth header is fallback
+            User caller = api.authenticate(exchange, false);
+            boolean isAdmin = caller != null && "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+            boolean isSelf = caller != null && caller.getUserID().toString().equals(clientId);
+            if (!isAdmin && !isSelf) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden\"}", 403);
                 return;
             }
 
             if (api.paymentMethodDAO != null) {
                 boolean deleted = api.paymentMethodDAO.delete(methodId, clientId);
                 if (deleted) {
+                    System.out.println("[RemovePaymentMethod] Removed methodId=" + methodId + " for clientId=" + clientId);
                     api.sendResponse(exchange, "{\"success\":true,\"message\":\"Payment method removed\"}", 200);
                     return;
                 }
@@ -1151,6 +1784,10 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // Authenticate
+            User caller = api.authenticate(exchange, true);
+            if (caller == null) return;
+
             String body = api.readRequestBody(exchange);
             Map<String, String> data = api.parseJsonBody(body);
 
@@ -1163,30 +1800,54 @@ public class ApiServer {
                 return;
             }
 
+            // Consultant can only set their own availability; Admin can set for any consultant
+            boolean isAdmin = "Admin".equalsIgnoreCase(caller.getAccountType().toString());
+            if (!isAdmin && !caller.getUserID().toString().equals(consultantId)) {
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Forbidden\"}", 403);
+                return;
+            }
+
+            // Database-first: resolve consultantId from DB only
+            String resolvedConsultantId = consultantId;
+            if (api.userDAO != null) {
+                try {
+                    User c = api.userDAO.findById(consultantId);
+                    if (c != null) {
+                        resolvedConsultantId = c.getUserID().toString();
+                    } else {
+                        api.sendResponse(exchange,
+                            "{\"success\":false,\"error\":\"Consultant not found in database\"}", 404);
+                        return;
+                    }
+                } catch (Exception e) {
+                    System.err.println("Error resolving consultant: " + e.getMessage());
+                    api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database error\"}", 500);
+                    return;
+                }
+            }
+
             try {
                 java.time.LocalDateTime start = java.time.LocalDateTime.parse(startTime.replace(" ", "T"));
                 java.time.LocalDateTime end = java.time.LocalDateTime.parse(endTime.replace(" ", "T"));
 
-                System.out.println("Setting availability for consultant: " + consultantId + " from " + start + " to " + end);
+                System.out.println("Setting availability for consultant: " + resolvedConsultantId + " from " + start + " to " + end);
 
-                // Try database first
+                // Database required
                 if (api.availabilityDAO != null) {
-                    boolean success = api.availabilityDAO.addAvailability(consultantId, start, end);
+                    boolean success = api.availabilityDAO.addAvailability(resolvedConsultantId, start, end);
                     if (success) {
-                        System.out.println("Availability saved to database successfully!");
                         api.sendResponse(exchange, "{\"success\":true,\"message\":\"Availability set successfully\"}", 200);
                         return;
                     } else {
-                        System.err.println("Failed to save availability to database");
+                        api.sendResponse(exchange,
+                            "{\"success\":false,\"error\":\"Failed to set availability. Consultant may not exist in database.\"}", 500);
+                        return;
                     }
-                } else {
-                    System.err.println("AvailabilityDAO is null - database not initialized");
                 }
 
-                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Failed to set availability\"}", 500);
+                api.sendResponse(exchange, "{\"success\":false,\"error\":\"Database not available\"}", 500);
             } catch (Exception e) {
                 System.err.println("Error setting availability: " + e.getMessage());
-                e.printStackTrace();
                 api.sendResponse(exchange, "{\"success\":false,\"error\":\"" + e.getMessage() + "\"}", 500);
             }
         }
@@ -1198,6 +1859,10 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // Authenticate — any logged-in user can view availability (for booking)
+            User caller = api.authenticate(exchange, true);
+            if (caller == null) return;
+
             String query = exchange.getRequestURI().getQuery();
             String consultantId = query != null && query.contains("consultantId=") ?
                 query.split("consultantId=")[1].split("&")[0] : null;
@@ -1237,6 +1902,10 @@ public class ApiServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            // Authenticate — any logged-in user
+            User caller = api.authenticate(exchange, true);
+            if (caller == null) return;
+
             String body = api.readRequestBody(exchange);
             Map<String, String> data = api.parseJsonBody(body);
             String message = data.get("message");

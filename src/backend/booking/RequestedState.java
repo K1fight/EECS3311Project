@@ -10,10 +10,12 @@ public class RequestedState implements BookingState {
 
     @Override
     public void confirm(Booking booking) {
-        System.out.println("Booking confirmed, pending payment.");
+        System.out.println("Booking confirmed by consultant.");
         booking.setState(new ConfirmedState());
         booking.setStatus(Confirmed);
         booking.notifyObservers();
+        // After confirmation, automatically transition to pending payment
+        booking.getCurrentState().pending(booking);
     }
 
     @Override

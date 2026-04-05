@@ -2,7 +2,7 @@
 ## Service Booking & Consulting Platform
 
 ## GitHub URL
-https://github.com/K1fight/EECS3311Project.git
+https://github.com/K1fight/EECS3311Project/tree/phase2
 
 ---
 
@@ -11,7 +11,7 @@ https://github.com/K1fight/EECS3311Project.git
 This is a **complete service booking and consulting platform** that connects clients with consultants. The system manages:
 
 - Consulting services catalog
-- Booking lifecycle (request → confirm → pending → pay → complete)
+- Booking lifecycle (request → confirm → pay → complete)
 - Payment processing (simulated)
 - User authentication and authorization
 - Admin oversight
@@ -28,7 +28,7 @@ This is a **complete service booking and consulting platform** that connects cli
 
 ## 2. Features
 
-### Phase 1 Features
+### Phase 1 Features ✅
 - **Client**
   - Browse consulting services
   - Request a booking
@@ -45,9 +45,9 @@ This is a **complete service booking and consulting platform** that connects cli
   - Approve consultant registrations
   - Define system policies (cancellation, pricing)
 
-### Phase 2 Features
-- **CLI frontend** (All core system workflows)
-- **Docker Deployment** (3 containers: backend, frontend, database)
+### Phase 2 Features ✅
+- **Docker Deployment** (4 containers: backend, frontend, database, builder)
+- **RESTful API Server** (Embedded HTTP server with JSON API)
 - **AI Customer Assistant Chatbot** (rule-based, privacy-safe)
 
 ---
@@ -57,14 +57,17 @@ This is a **complete service booking and consulting platform** that connects cli
 | Pattern | Location | Purpose |
 |---------|----------|---------|
 | **State Pattern** | `backend/booking/` | Booking lifecycle management (Requested → Confirmed → Paid → Completed) |
-| **Factory Method** | `backend/payment/` | Payment method creation (CreditCard, PayPal, BankTransfer, etc.) |
+| **Factory Method** | `backend/payment/` | Payment method creation (CreditCard, PayPal, BankTransfer, DebitCard) |
 | **Proxy Pattern** | `backend/user/UserProxy.java` | Access control and role checking |
-| **Strategy/Policy** | `backend/policy/` | Cancellation rules, pricing strategies |
+| **Strategy/Policy** | `backend/policy/` | Cancellation rules, pricing strategies (Fixed/Dynamic) |
 | **Observer Pattern** | `backend/notification/` | Booking status notifications |
+| **DAO Pattern** | `backend/database/` | Data access abstraction for all entities |
 
 ---
 
 ## 4. How to Run
+
+### Option A: Docker (Recommended - Phase 2)
 
 **Single command deployment:**
 
@@ -72,10 +75,11 @@ This is a **complete service booking and consulting platform** that connects cli
 docker-compose up --build
 ```
 
-This starts 3 containers:
+This starts 4 containers:
 - `eecs3311-db` - PostgreSQL database (port 5434)
-- `eecs3311-backend` - Backend API (port 8080)
-- `eecs3311-frontend` - CLI
+- `eecs3311-builder` - Java build container
+- `eecs3311-app` - Backend API (port 8080)
+- `eecs3311-frontend` - Web UI (port 3000)
 
 **Access the application:**
 - Frontend: http://localhost:3000
@@ -87,6 +91,30 @@ This starts 3 containers:
 docker-compose down
 ```
 
+### Option B: Local Development (Phase 1)
+
+**Prerequisites:**
+- Java 17+
+- PostgreSQL (optional, runs in demo mode without DB)
+
+**Steps:**
+1. Compile the project:
+```bash
+mkdir -p build/classes lib
+wget -O lib/postgresql-42.6.0.jar https://jdbc.postgresql.org/download/postgresql-42.6.0.jar
+javac -d build/classes -cp "src:lib/*" src/backend/**/*.java src/frontend/**/*.java
+```
+
+2. Run the API server:
+```bash
+java -cp "build/classes:lib/*" backend.Main
+```
+
+3. Run the Swing UI (optional):
+```bash
+java -cp "build/classes:lib/*" frontend.BookingUI
+```
+
 ---
 
 ## 5. Project Structure
@@ -95,39 +123,46 @@ docker-compose down
 EECS3311Project/
 ├── src/
 │   ├── backend/
-│   │   ├── api/              # REST API handlers
-│   │   ├── booking/          # Booking domain + State pattern
-│   │   ├── core/             # Service layer orchestration
-│   │   ├── database/         # DAOs + DB connection
-│   │   ├── notification/     # Observer pattern
-│   │   ├── payment/          # Payment + Factory pattern
-│   │   ├── policy/           # Strategy/Policy patterns
-│   │   ├── service/          # Service entities
-│   │   └── user/             # Users + Proxy pattern
+│   │   ├── api/              # REST API handlers (ApiServer.java)
+│   │   ├── booking/          # Booking domain + State pattern (8 files)
+│   │   ├── core/             # Service layer orchestration (7 files)
+│   │   ├── database/         # DAOs + DB connection (11 files)
+│   │   ├── notification/     # Observer pattern (2 files)
+│   │   ├── payment/          # Payment + Factory pattern (11 files)
+│   │   ├── policy/           # Strategy/Policy patterns (9 files)
+│   │   ├── service/          # Service entities (1 file)
+│   │   ├── user/             # Users + Proxy pattern (5 files)
+│   │   ├── EnvConfig.java    # Environment configuration
+│   │   └── Main.java         # Application entry point
 │   └── frontend/
-│       ├── BookingUI.java    # UI
-│       └── Dockerfile        # Frontend container
+│       ├── BookingUI.java    # Swing GUI frontend
+│       └── FrontendEnvConfig.java  # Frontend configuration
 ├── diagrams/                 # UML diagrams
 ├── docker-compose.yml        # Docker orchestration
 ├── nginx.conf                # Frontend server config
 ├── database.properties       # DB configuration
 ├── .env.example              # Environment template
+├── API_DOCUMENTATION.md      # Detailed API docs
+├── AI_CHATBOT_DOCUMENTATION.md  # Chatbot documentation
+├── DOCKER_README.md          # Docker setup guide
 └── README.md                 # This file
 ```
 
 ### Package Responsibilities
 
-| Package | Responsibility |
-|---------|---------------|
-| `booking` | Booking lifecycle, state transitions |
-| `core` | Use case orchestration (ClientService, ConsultantService, etc.) |
-| `payment` | Payment creation, processing, transaction history |
-| `policy` | Business rules (cancellation, pricing, refunds) |
-| `user` | User entities, roles, access control |
-| `notification` | Simulated notifications |
-| `service` | Consulting service catalog |
-| `database` | PostgreSQL DAOs and connection management |
-| `api` | REST API endpoints |
+| Package | Responsibility                                                  | Files |
+|---------|-----------------------------------------------------------------|-------|
+| `booking` | Booking lifecycle, state transitions                            | 8 |
+| `core` | Use case orchestration (ClientService, ConsultantService, etc.) | 7 |
+| `payment` | Payment creation, processing, transaction history               | 11 |
+| `policy` | Business rules (cancellation, pricing, refunds)                 | 9 |
+| `user` | User entities, roles, access control                            | 5 |
+| `notification` | Simulated notifications (Observer pattern)                      | 2 |
+| `service` | Consulting service catalog                                      | 1 |
+| `database` | PostgreSQL DAOs and connection management                       | 11 |
+| `api` | REST API endpoints                                              | 1 |
+| `frontend` | Java cli interface                                              | 2 |
+
 
 ---
 
@@ -161,11 +196,26 @@ EECS3311Project/
 |--------|----------|-------------|
 | POST | `/api/payments/pay` | Process payment |
 | GET | `/api/payments/history` | Get payment history |
+| POST | `/api/payments/methods/add` | Add payment method |
+| GET | `/api/payments/methods` | Get user's payment methods |
 
 ### AI Chatbot
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/ai/chat` | Chat with AI assistant |
+
+### Admin
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/admin/pending-consultants` | Get pending consultant approvals |
+| POST | `/api/admin/approve-consultant` | Approve a consultant |
+| POST | `/api/admin/set-policy` | Set system policy |
+
+### Consultant Availability
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/consultants/availability` | Set availability |
+| GET | `/api/consultants/availability` | Get availability |
 
 ### System
 | Method | Endpoint | Description |
@@ -183,42 +233,44 @@ EECS3311Project/
    docker-compose up
    ```
 
-2. **Register as Client:**
+2. **Open http://localhost:3000**
+
+3. **Register as Client:**
    - Click "Register" tab
    - Name: `John Doe`
    - Email: `john@example.com`
    - Password: `password123`
    - Account Type: `Client`
 
-3. **Browse Services:**
+4. **Browse Services:**
    - Navigate to "Browse Services"
    - View available consulting services
 
-4. **Request Booking:**
+5. **Request Booking:**
    - Click "Book Now" on a service
    - Select consultant and time slot
    - Submit booking request
 
-5. **Login as Consultant:**
+6. **Login as Consultant:**
    - Logout and login as consultant
    - Email: `consultant@example.com`
    - Password: `demo123`
    - Account Type: `Consultant`
 
-6. **Accept Booking:**
+7. **Accept Booking:**
    - Go to "Booking Requests"
    - Click "Accept" on pending request
 
-7. **Login as Client and Pay:**
+8. **Login as Client and Pay:**
    - Logout and login as client
    - Go to "My Bookings"
    - Click "Pay Now" on confirmed booking
 
-8. **Consultant Completes:**
+9. **Consultant Completes:**
    - Login as consultant
    - Mark booking as completed
 
-9. **Try AI Chatbot:**
+10. **Try AI Chatbot:**
     - Ask questions like "How do I book?" or "What payment methods?"
 
 ---
@@ -235,10 +287,10 @@ Requested → Confirmed → PendingPayment → Paid → Completed
 
 | From State | Action | To State | Actor |
 |------------|--------|----------|-------|
-| Requested | Confirm | Confirmed | Consultant |
+| Requested | Confirm | Confirmed → PendingPayment | Consultant |
 | Requested | Reject | Rejected | Consultant |
-| Confirmed | Cancel | Cancelled | Client |
-| Confirmed | Pay | Paid | Client |
+| PendingPayment | Pay | Paid | Client |
+| PendingPayment | Cancel | Cancelled | Client |
 | Paid | Complete | Completed | Consultant |
 | Paid | Cancel | Cancelled + Refund | Client |
 
@@ -279,8 +331,8 @@ The AI Customer Assistant helps clients with:
 
 | Member | Responsibilities | GitHub |
 |--------|-----------------|--------|
-| Bin Tang | Backend architecture, design patterns | K1fight |
-| Zehao Liu | Frontend, documentation, corrections | liu0205-mario |
+| Bin Tang | Backend architecture, Docker setup, AI integration, frontend/backend functions | K1fight |
+| Zehao Liu | Correction of backend and frontend, documentation | liu0205-mario |
 | Haiyun He | UML diagrams, backend additions | 3canary |
 
 ---
@@ -310,9 +362,10 @@ cp .env.example .env
 
 ### Phase 1
 - In-memory storage (no persistence without Docker)
-- CLI frontend with basic features
+- CLI/Swing frontend only
 
 ### Phase 2
+- AI chatbot uses rule-based responses (not real LLM)
 - Simulated payments (no real payment gateway)
 - Demo credentials for quick testing
 
@@ -377,6 +430,7 @@ curl -X POST http://localhost:8080/api/users/login \
 
 ## 15. Future Enhancements (Phase 3)
 
+- Real LLM integration (OpenAI/Claude API)
 - Real payment gateway (Stripe/PayPal)
 - Email notifications
 - Calendar integration

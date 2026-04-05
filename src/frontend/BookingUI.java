@@ -23,16 +23,11 @@ public class BookingUI {
     private Scanner scanner = new Scanner(System.in);
     private DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private HttpClient httpClient = HttpClient.newHttpClient();
-    private String apiBaseUrl = System.getenv("API_BASE_URL") != null
-            ? System.getenv("API_BASE_URL")
-            : "http://localhost:8080/api";
+    private String apiBaseUrl = FrontendEnvConfig.getApiBaseUrl();
     private String currentUserId = null;
     private String currentUserEmail = null;
 
-    // Map to store consultant IDs from API (email -> userId)
-    private Map<String, String> consultantIdMap = new HashMap<>();
-    // Map to store service IDs from API (name -> serviceId)
-    private Map<String, String> serviceIdMap = new HashMap<>();
+    // Maps are now loaded fresh on every request — do not cache here
 
     // Services
     private AdminService adminService;
@@ -54,6 +49,45 @@ public class BookingUI {
         ui.initialize();
         ui.run();
     }
+
+    // ======================== API HELPERS ========================
+
+    /**
+     * Build an HttpRequest builder with Authorization header set if logged in.
+     * Use for all authenticated API calls.
+     */
+    private HttpRequest.Builder authRequest(String uri, HttpRequest.BodyPublisher body) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(uri));
+        if (currentUserId != null) {
+            builder.header("Authorization", currentUserId);
+        }
+        if (body != null) {
+            builder.POST(body);
+        } else {
+            builder.GET();
+        }
+        return builder;
+    }
+
+    /**
+     * Send an authenticated GET request.
+     */
+    private HttpResponse<String> apiGet(String uri) throws Exception {
+        return httpClient.send(authRequest(uri, null).build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    /**
+     * Send an authenticated POST request with a JSON body.
+     */
+    private HttpResponse<String> apiPost(String uri, String jsonBody) throws Exception {
+        return httpClient.send(
+            authRequest(uri, HttpRequest.BodyPublishers.ofString(jsonBody))
+                .header("Content-Type", "application/json")
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    }
+
+    // ======================== INITIALIZATION ========================
 
     public void initialize() {
         System.out.println("Connecting to API server at " + apiBaseUrl + "...");
@@ -91,7 +125,7 @@ public class BookingUI {
     }
 
     private void initializeServices() {
-        // Try to load services from API first
+        // Always load services from database via API first
         availableServices = new ArrayList<>();
 
         try {
@@ -104,60 +138,64 @@ public class BookingUI {
 
             if (response.statusCode() == 200) {
                 String responseBody = response.body();
-                // Parse services from JSON response
                 if (responseBody.contains("\"services\":")) {
                     int start = responseBody.indexOf("\"services\":[");
                     int arrayStart = responseBody.indexOf("[", start);
-                    int arrayEnd = responseBody.indexOf("]", arrayStart);
-                    String servicesJson = responseBody.substring(arrayStart, arrayEnd + 1);
+                    int arrayEnd = responseBody.lastIndexOf("]");
+                    if (arrayStart == -1 || arrayEnd == -1 || arrayEnd <= arrayStart) {
+                        System.err.println("initializeServices: malformed services array");
+                    } else {
+                        String servicesJson = responseBody.substring(arrayStart, arrayEnd + 1);
 
-                    int pos = 0;
-                    while (pos < servicesJson.length()) {
-                        int objStart = servicesJson.indexOf("{", pos);
-                        if (objStart == -1) break;
-                        int objEnd = servicesJson.indexOf("}", objStart);
-                        if (objEnd == -1) break;
+                        // Use extractArray for robust parsing
+                        List<Map<String, String>> serviceMaps = extractArray(responseBody, "services");
+                        for (Map<String, String> m : serviceMaps) {
+                            String serviceId = m.get("serviceId");
+                            String name = m.get("name");
+                            String description = m.get("description");
+                            String priceStr = m.get("basePrice");
+                            String durationStr = m.get("durationMinutes");
+                            String category = m.get("category");
 
-                        String obj = servicesJson.substring(objStart, objEnd + 1);
+                            if (serviceId != null && name != null && priceStr != null && durationStr != null) {
+                                try {
+                                    double price = Double.parseDouble(priceStr);
+                                    int duration = Integer.parseInt(durationStr);
+                                    ServiceCategory cat = ServiceCategory.valueOf(category != null ? category : "Career");
 
-                        String serviceId = extractJsonValue(obj, "serviceId");
-                        String name = extractJsonValue(obj, "name");
-                        String description = extractJsonValue(obj, "description");
-                        String priceStr = extractJsonValue(obj, "basePrice");
-                        String durationStr = extractJsonValue(obj, "durationMinutes");
-                        String category = extractJsonValue(obj, "category");
-
-                        if (serviceId != null && name != null && priceStr != null && durationStr != null) {
-                            double price = Double.parseDouble(priceStr);
-                            int duration = Integer.parseInt(durationStr);
-                            ServiceCategory cat = ServiceCategory.valueOf(category != null ? category : "Career");
-
-                            ConsultingService service = new ConsultingService(name, description, price, duration, cat);
-                            availableServices.add(service);
-                            // Store service ID mapping
-                            serviceIdMap.put(name, serviceId);
+                                    ConsultingService service = new ConsultingService(name, description, price, duration, cat);
+                                    service.setServiceId(java.util.UUID.fromString(serviceId));
+                                    availableServices.add(service);
+                                    System.out.println("Loaded service: " + name + " (id=" + serviceId + ")");
+                                } catch (Exception e) {
+                                    System.err.println("Error parsing service: " + e.getMessage());
+                                }
+                            }
                         }
 
-                        pos = objEnd + 1;
-                    }
-
-                    if (!availableServices.isEmpty()) {
-                        System.out.println("Loaded " + availableServices.size() + " services from database.");
-                        return;
+                        if (!availableServices.isEmpty()) {
+                            System.out.println("Loaded " + availableServices.size() + " services from database.");
+                            return;
+                        }
                     }
                 }
+            } else {
+                System.err.println("initializeServices: API returned status " + response.statusCode());
             }
         } catch (Exception e) {
             System.err.println("Error loading services from API: " + e.getMessage());
         }
 
-        // Fallback to hardcoded services
+        // Fallback to hardcoded services if database is empty
+        System.out.println("WARNING: No services loaded from database. Using default services.");
         availableServices.add(new ConsultingService("Career Counseling", "Professional career guidance and advice", 100.0, 60, ServiceCategory.Career));
         availableServices.add(new ConsultingService("IT Consulting", "Technology and software development advice", 150.0, 90, ServiceCategory.Technology));
         availableServices.add(new ConsultingService("Financial Advisory", "Financial planning and investment advice", 200.0, 60, ServiceCategory.Finance));
 
         System.out.println("System initialized with " + availableServices.size() + " consulting services.");
     }
+
+    // ======================== FRESH MAP LOADERS (called every request) ========================
 
     public void run() {
         System.out.println("===========================================");
@@ -224,7 +262,7 @@ public class BookingUI {
 
         try {
             // Call API login endpoint
-            String jsonData = "{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}";
+            String jsonData = "{\"email\":\"" + email + "\",\"password\":\"" + password + "\",\"accountType\":\"Client\"}";
 
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(apiBaseUrl + "/users/login"))
@@ -238,28 +276,36 @@ public class BookingUI {
                 String responseBody = response.body();
                 // Parse response to get user info
                 if (responseBody.contains("\"success\":true")) {
-                    // Extract user ID and info from response
+                    // Extract user ID from API response — THIS IS THE REAL DB UUID
                     currentUserId = extractJsonValue(responseBody, "userId");
                     currentUserEmail = email;
-                    isLoggedIn = true;
                     String userName = extractJsonValue(responseBody, "name");
-                    System.out.println("Welcome, " + userName + "!");
+                    String accountType = extractJsonValue(responseBody, "accountType");
+                    String isApprovedStr = extractJsonValue(responseBody, "isApproved");
+                    boolean isApproved = "true".equalsIgnoreCase(isApprovedStr);
 
-                    // Create a temporary user object for API login (since we don't have the full User object)
-                    // This allows main menu to work even without local user object
-                    try {
-                        Client tempClient = new Client(userName, email, "dummy");
-                        UserProxy userProxy = new UserProxy(tempClient);
-                        userProxy.logIn();
-                        currentUser = userProxy;
-                    } catch (Exception e) {
-                        // Ignore - we'll handle null currentUser in showMainmenu
+                    // FIX: Rebuild User with the REAL UUID from database, not a random one
+                    User realUser;
+                    if ("Consultant".equals(accountType)) {
+                        realUser = new Consultant(java.util.UUID.fromString(currentUserId), userName, email, "dummy", isApproved);
+                    } else if ("Client".equals(accountType)) {
+                        realUser = new Client(java.util.UUID.fromString(currentUserId), userName, email, "dummy");
+                    } else {
+                        realUser = new backend.user.Admin(java.util.UUID.fromString(currentUserId), userName, email, "dummy");
                     }
+
+                    UserProxy userProxy = new UserProxy(realUser);
+                    userProxy.logIn();
+                    currentUser = userProxy;
+                    isLoggedIn = true;
+                    System.out.println("Welcome, " + userName + "!");
                     return;
                 }
             }
 
             System.out.println("Login failed! Invalid credentials.");
+        } catch (java.lang.NumberFormatException e) {
+            System.out.println("Login failed: Server returned invalid data.");
         } catch (Exception e) {
             System.out.println("Error connecting to server: " + e.getMessage());
             System.out.println("Falling back to local authentication...");
@@ -272,13 +318,16 @@ public class BookingUI {
                 User authenticatedUser = userService.authenticateUser(email, inputPassword);
 
                 if (authenticatedUser instanceof Client) {
+                    // FIX: currentUserId must be the SAME UUID that DB insert used
+                    currentUserId = client.getUserID().toString();
+                    currentUserEmail = email;
                     UserProxy userProxy = new UserProxy(authenticatedUser);
                     currentUser = userProxy;
                     userProxy.logIn();
                     isLoggedIn = true;
-                    currentUserId = client.getUserID().toString();
-                    currentUserEmail = email;
                     System.out.println("Welcome, " + client.getName() + "!");
+                } else {
+                    System.out.println("Password incorrect.");
                 }
             } else {
                 System.out.println("Client not found! Please register first.");
@@ -293,7 +342,7 @@ public class BookingUI {
         String password = scanner.nextLine();
 
         try {
-            String jsonData = "{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}";
+            String jsonData = "{\"email\":\"" + email + "\",\"password\":\"" + password + "\",\"accountType\":\"Consultant\"}";
 
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(apiBaseUrl + "/users/login"))
@@ -306,26 +355,31 @@ public class BookingUI {
             if (response.statusCode() == 200) {
                 String responseBody = response.body();
                 if (responseBody.contains("\"success\":true")) {
+                    // FIX: Use the REAL UUID from DB, not a random one
                     currentUserId = extractJsonValue(responseBody, "userId");
                     currentUserEmail = email;
-                    isLoggedIn = true;
                     String userName = extractJsonValue(responseBody, "name");
-                    System.out.println("Welcome, " + userName + "!");
+                    String isApprovedStr = extractJsonValue(responseBody, "isApproved");
+                    boolean isApproved = "true".equalsIgnoreCase(isApprovedStr);
 
-                    // Create a temporary user object for API login
-                    try {
-                        Consultant tempConsultant = new Consultant(userName, email, "dummy");
-                        UserProxy userProxy = new UserProxy(tempConsultant);
-                        userProxy.logIn();
-                        currentUser = userProxy;
-                    } catch (Exception ex) {
-                        // Ignore
-                    }
+                    Consultant realConsultant = new Consultant(
+                            java.util.UUID.fromString(currentUserId), userName, email, "dummy", isApproved);
+                    UserProxy userProxy = new UserProxy(realConsultant);
+                    userProxy.logIn();
+                    currentUser = userProxy;
+                    isLoggedIn = true;
+                    System.out.println("Welcome, " + userName + "!");
+                    return;
+                } else {
+                    String error = extractJsonValue(responseBody, "error");
+                    System.out.println("Login failed: " + (error != null ? error : "Invalid credentials or pending approval."));
                     return;
                 }
             }
 
             System.out.println("Login failed! Invalid credentials or account pending approval.");
+        } catch (java.lang.NumberFormatException e) {
+            System.out.println("Login failed: Server returned invalid data.");
         } catch (Exception e) {
             System.out.println("Error connecting to server: " + e.getMessage());
             System.out.println("Falling back to local authentication...");
@@ -341,13 +395,16 @@ public class BookingUI {
                         System.out.println("Your account is pending approval. Please wait for admin approval.");
                         return;
                     }
+                    // FIX: currentUserId must be the SAME UUID that DB insert used
+                    currentUserId = consultant.getUserID().toString();
+                    currentUserEmail = email;
                     UserProxy userProxy = new UserProxy(authenticatedUser);
                     currentUser = userProxy;
                     userProxy.logIn();
                     isLoggedIn = true;
-                    currentUserId = consultant.getUserID().toString();
-                    currentUserEmail = email;
                     System.out.println("Welcome, " + consultant.getName() + "!");
+                } else {
+                    System.out.println("Password incorrect.");
                 }
             } else {
                 System.out.println("Consultant not found! Please register first.");
@@ -356,13 +413,66 @@ public class BookingUI {
     }
 
     private void loginAsAdmin() {
-        Admin admin = new Admin("System Admin", "admin@system.com", "admin");
-        // Use UserProxy to control permissions
-        UserProxy userProxy = new UserProxy(admin);
-        currentUser = userProxy;
-        userProxy.logIn();
-        isLoggedIn = true;
-        System.out.println("Welcome, Administrator!");
+        System.out.print("Enter admin email: ");
+        String email = scanner.nextLine();
+        System.out.print("Enter password: ");
+        String password = scanner.nextLine();
+
+        try {
+            String jsonData = "{\"email\":\"" + email + "\",\"password\":\"" + password + "\",\"accountType\":\"Admin\"}";
+
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(apiBaseUrl + "/users/login"))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonData))
+                .header("Content-Type", "application/json")
+                .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200) {
+                String responseBody = response.body();
+                if (responseBody.contains("\"success\":true")) {
+                    // FIX: Use the REAL UUID from DB, not a random one
+                    currentUserId = extractJsonValue(responseBody, "userId");
+                    currentUserEmail = email;
+                    String userName = extractJsonValue(responseBody, "name");
+
+                    backend.user.Admin realAdmin = new backend.user.Admin(
+                            java.util.UUID.fromString(currentUserId), userName, email, "dummy");
+                    UserProxy userProxy = new UserProxy(realAdmin);
+                    userProxy.logIn();
+                    currentUser = userProxy;
+                    isLoggedIn = true;
+                    System.out.println("Welcome, Administrator!");
+                    return;
+                } else {
+                    String error = extractJsonValue(responseBody, "error");
+                    System.out.println("Login failed: " + (error != null ? error : "Invalid credentials."));
+                    return;
+                }
+            }
+
+            System.out.println("Login failed! Invalid admin credentials.");
+        } catch (java.lang.NumberFormatException e) {
+            System.out.println("Login failed: Server returned invalid data.");
+        } catch (Exception e) {
+            System.out.println("Error connecting to server: " + e.getMessage());
+            System.out.println("Falling back to local authentication...");
+
+            // Fallback: hardcoded admin (no UUID to match DB — only for offline mode)
+            if ("admin@system.com".equals(email) && "admin".equals(password)) {
+                Admin admin = new Admin("System Admin", email, password);
+                currentUserId = admin.getUserID().toString(); // random UUID — admin actions will fail on DB
+                currentUserEmail = email;
+                UserProxy userProxy = new UserProxy(admin);
+                currentUser = userProxy;
+                userProxy.logIn();
+                isLoggedIn = true;
+                System.out.println("Welcome, Administrator! (offline mode — DB operations may fail)");
+            } else {
+                System.out.println("Invalid admin credentials.");
+            }
+        }
     }
 
     private void registerClient() {
@@ -386,7 +496,10 @@ public class BookingUI {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
-                System.out.println("Registration successful! You can now login.");
+                // FIX: Extract real DB UUID from response so subsequent operations use it
+                String dbUserId = extractJsonValue(response.body(), "userId");
+                System.out.println("Registration successful! User ID: " + dbUserId);
+                System.out.println("You can now login.");
                 return;
             }
         } catch (Exception e) {
@@ -423,7 +536,10 @@ public class BookingUI {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
-                System.out.println("Registration successful! You can now login after admin approval.");
+                // FIX: Extract real DB UUID from response
+                String dbUserId = extractJsonValue(response.body(), "userId");
+                System.out.println("Registration successful! User ID: " + dbUserId);
+                System.out.println("You can now login after admin approval.");
                 return;
             }
         } catch (Exception e) {
@@ -647,12 +763,7 @@ public class BookingUI {
         System.out.println("\n=== Available Services ===");
 
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/services"))
-                .GET()
-                .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = apiGet(apiBaseUrl + "/services");
 
             if (response.statusCode() == 200) {
                 String responseBody = response.body();
@@ -695,14 +806,37 @@ public class BookingUI {
         }
         ConsultingService service = availableServices.get(serviceIndex);
 
-        // Get consultants from API
-        List<Consultant> consultants = getConsultantsFromAPI();
-        if (consultants.isEmpty()) {
+        // Get consultants from API (each object now carries real DB UUID from getConsultantsFromAPI)
+        List<Consultant> allConsultants = getConsultantsFromAPI();
+        if (allConsultants.isEmpty()) {
             System.out.println("No consultants available yet. Please wait for consultants to register.");
             return;
         }
 
-        System.out.println("\nAvailable Consultants:");
+        // Filter: only show consultants who have set at least one available time slot
+        List<Consultant> consultants = new ArrayList<>();
+        for (Consultant c : allConsultants) {
+            String cid = c.getUserID().toString();
+            try {
+                HttpResponse<String> resp = apiGet(apiBaseUrl + "/availability/get?consultantId=" + cid);
+                if (resp.statusCode() == 200) {
+                    List<Map<String, String>> slots = extractArray(resp.body(), "availability");
+                    if (!slots.isEmpty()) {
+                        consultants.add(c);
+                    }
+                }
+            } catch (Exception e) {
+                // Skip on error — don't show this consultant
+            }
+        }
+
+        if (consultants.isEmpty()) {
+            System.out.println("No consultants have set their availability yet.");
+            System.out.println("Please wait for consultants to add available time slots.");
+            return;
+        }
+
+        System.out.println("\nAvailable Consultants (showing only those with available time slots):");
         int i = 1;
         for (Consultant consultant : consultants) {
             System.out.printf("%d. %s%n", i++, consultant.getName());
@@ -717,48 +851,101 @@ public class BookingUI {
 
         Consultant consultant = consultants.get(consultantIndex - 1);
 
+        // Use real DB UUID stored in the Consultant object
+        String consultantId = consultant.getUserID().toString();
+        if (consultantId == null || consultantId.isEmpty()) {
+            System.out.println("Error: Consultant ID not found. Please reload consultant list.");
+            return;
+        }
+
         // Enter start time
         System.out.print("Enter start time (yyyy-MM-dd HH:mm): ");
         String timeStr = scanner.nextLine();
         LocalDateTime startTime = LocalDateTime.parse(timeStr, formatter);
 
+        // ===== Step 1: Check consultant availability from database =====
+        boolean isAvailable = false;
+        String availabilityInfo = "";
         try {
-            // Try API first
-            // Get consultant ID from the map (API returns userId, Consultant object has random UUID)
-            String consultantId = consultantIdMap.containsKey(consultant.getEmail())
-                ? consultantIdMap.get(consultant.getEmail())
-                : consultant.getUserID().toString();
+            HttpResponse<String> availResponse = apiGet(apiBaseUrl + "/availability/get?consultantId=" + consultantId);
+            if (availResponse.statusCode() == 200 && availResponse.body().contains("\"success\":true")) {
+                List<Map<String, String>> slots = extractArray(availResponse.body(), "availability");
 
-            // Get service ID from the map (API returns UUID, local object has random UUID)
-            String serviceId = serviceIdMap.containsKey(service.getName())
-                ? serviceIdMap.get(service.getName())
-                : service.getServiceId().toString();
+                if (slots.isEmpty()) {
+                    System.out.println("Error: This consultant has not set any available time slots.");
+                    System.out.println("Please ask the consultant to set their availability first.");
+                    return;
+                }
+
+                System.out.println("\nConsultant available time slots:");
+                for (Map<String, String> slot : slots) {
+                    String start = slot.getOrDefault("startTime", "?");
+                    String end = slot.getOrDefault("endTime", "?");
+                    System.out.println("  - " + start + " to " + end);
+
+                    // Parse and check if requested time is within this slot
+                    try {
+                        LocalDateTime slotStart = LocalDateTime.parse(start.replace(" ", "T"));
+                        LocalDateTime slotEnd = LocalDateTime.parse(end.replace(" ", "T"));
+                        if (!startTime.isBefore(slotStart) && startTime.isBefore(slotEnd)) {
+                            isAvailable = true;
+                            availabilityInfo = slotStart + " to " + slotEnd;
+                        }
+                    } catch (Exception e) {
+                        System.err.println("Error parsing time slot: " + e.getMessage());
+                    }
+                }
+
+                if (!isAvailable) {
+                    System.out.println("\nError: Selected time " + startTime + " is not within any available slot.");
+                    return;
+                }
+
+                System.out.println("\n✓ Time slot verified: " + availabilityInfo);
+            } else {
+                System.out.println("Warning: Could not verify availability (API error). Proceeding anyway.");
+                isAvailable = true; // Allow to proceed if API fails
+            }
+        } catch (Exception e) {
+            System.out.println("Warning: Could not verify availability: " + e.getMessage());
+            System.out.println("Proceeding without availability check...");
+            isAvailable = true; // Allow fallback
+        }
+
+        // ===== Step 2: Create booking =====
+        try {
+            // Use the serviceId stored in the ConsultingService object (loaded from DB in initializeServices)
+            String serviceId = service.getServiceId().toString();
+            System.out.println("[DEBUG] serviceId=" + serviceId + ", serviceName=" + service.getName());
+            if (serviceId == null || serviceId.isEmpty()) {
+                System.out.println("Error: Service ID not found. Please reload services list.");
+                return;
+            }
 
             String jsonData = "{\"clientId\":\"" + currentUserId + "\",\"consultantId\":\"" +
                              consultantId + "\",\"serviceId\":\"" +
                              serviceId + "\",\"startTime\":\"" +
                              startTime.toString().replace("T", " ") + "\"}";
 
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/bookings/create"))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonData))
-                .header("Content-Type", "application/json")
-                .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = apiPost(apiBaseUrl + "/bookings/create", jsonData);
 
             if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
                 System.out.println("Booking created successfully via API!");
                 return;
+            } else {
+                String error = extractJsonValue(response.body(), "error");
+                System.out.println("Booking failed: " + (error != null ? error : response.body()));
             }
         } catch (Exception e) {
-            System.out.println("API booking failed, using local booking...");
+            System.out.println("API booking failed: " + e.getMessage());
+            System.out.println("Falling back to local booking...");
         }
 
-        // Fallback to local booking
+        // Fallback to local booking (in-memory only — DB FK will be wrong if API is down)
         try {
             Booking booking = clientService.requestBooking(client, service, consultant, startTime);
-            System.out.println("Booking created successfully! ID: " + booking.getBookingId());
+            System.out.println("Booking created locally (API unavailable) — ID: " + booking.getBookingId());
+            System.out.println("Warning: This booking may not appear in database queries.");
         } catch (Exception e) {
             System.out.println("Failed to create booking: " + e.getMessage());
         }
@@ -768,51 +955,27 @@ public class BookingUI {
         List<Consultant> consultants = new ArrayList<>();
 
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/users/consultants"))
-                .GET()
-                .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = apiGet(apiBaseUrl + "/users/consultants");
 
             if (response.statusCode() == 200) {
                 String responseBody = response.body();
-                // Parse consultants from JSON response
                 if (responseBody.contains("\"consultants\":")) {
-                    // Extract consultants array
-                    int start = responseBody.indexOf("\"consultants\":[");
-                    int arrayStart = responseBody.indexOf("[", start);
-                    int arrayEnd = responseBody.indexOf("]", arrayStart);
-                    String consultantsJson = responseBody.substring(arrayStart, arrayEnd + 1);
-
-                    // Parse each consultant object
-                    int pos = 0;
-                    while (pos < consultantsJson.length()) {
-                        int objStart = consultantsJson.indexOf("{", pos);
-                        if (objStart == -1) break;
-                        int objEnd = consultantsJson.indexOf("}", objStart);
-                        if (objEnd == -1) break;
-
-                        String obj = consultantsJson.substring(objStart, objEnd + 1);
-
-                        // Extract fields
-                        String userId = extractJsonValue(obj, "userId");
-                        String name = extractJsonValue(obj, "name");
-                        String email = extractJsonValue(obj, "email");
-                        String isApproved = extractJsonValue(obj, "isApproved");
+                    // Use extractArray for robust parsing
+                    List<Map<String, String>> consultantMaps = extractArray(responseBody, "consultants");
+                    for (Map<String, String> m : consultantMaps) {
+                        String userId = m.get("userId");
+                        String name = m.get("name");
+                        String email = m.get("email");
+                        String isApproved = m.get("isApproved");
 
                         if (userId != null && name != null && email != null) {
-                            // Only add approved consultants
                             if ("true".equalsIgnoreCase(isApproved)) {
-                                Consultant c = new Consultant(name, email, "dummy");
-                                // We'll use email as key for now
+                                // Store real DB UUID in the Consultant object
+                                Consultant c = new Consultant(
+                                    java.util.UUID.fromString(userId), name, email, "dummy", true);
                                 consultants.add(c);
-                                // Store the ID mapping for booking
-                                consultantIdMap.put(email, userId);
                             }
                         }
-
-                        pos = objEnd + 1;
                     }
 
                     if (!consultants.isEmpty()) {
@@ -844,12 +1007,7 @@ public class BookingUI {
         System.out.println("\n=== My Bookings ===");
 
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/bookings/client?clientId=" + currentUserId))
-                .GET()
-                .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = apiGet(apiBaseUrl + "/bookings/client?clientId=" + currentUserId);
 
             if (response.statusCode() == 200) {
                 String responseBody = response.body();
@@ -901,17 +1059,11 @@ public class BookingUI {
         viewMyBookings(client);
 
         System.out.print("Enter booking ID to cancel: ");
-        String bookingIdStr = scanner.nextLine();
+        String bookingIdStr = scanner.nextLine().trim();
 
         try {
-            String jsonData = "{\"bookingId\":\"" + bookingIdStr + "\"}";
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/bookings/cancel"))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonData))
-                .header("Content-Type", "application/json")
-                .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            String jsonData = "{\"bookingId\":\"" + bookingIdStr + "\",\"clientId\":\"" + currentUserId + "\"}";
+            HttpResponse<String> response = apiPost(apiBaseUrl + "/bookings/cancel", jsonData);
             if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
                 System.out.println("Booking cancelled successfully!");
             } else {
@@ -930,51 +1082,152 @@ public class BookingUI {
         viewMyBookings(client);
 
         System.out.print("Enter booking ID to pay: ");
-        String bookingIdStr = scanner.nextLine();
-
-        // Select payment method
-        System.out.println("\nSelect Payment Method:");
-        System.out.println("1. CreditCard");
-        System.out.println("2. DebitCard");
-        System.out.println("3. PayPal");
-        System.out.println("4. BankTransfer");
-        System.out.print("Choose (1-4): ");
-        String methodChoice = scanner.nextLine();
-
-        String paymentMethod;
-        switch (methodChoice) {
-            case "1": paymentMethod = "CreditCard"; break;
-            case "2": paymentMethod = "DebitCard"; break;
-            case "3": paymentMethod = "PayPal"; break;
-            case "4": paymentMethod = "BankTransfer"; break;
-            default: paymentMethod = "CreditCard";
-        }
-
-        System.out.print("Enter amount: $");
-        String amountStr = scanner.nextLine();
-        double amount;
-        try {
-            amount = Double.parseDouble(amountStr);
-        } catch (NumberFormatException e) {
-            System.out.println("Invalid amount!");
+        String bookingIdStr = scanner.nextLine().trim();
+        if (bookingIdStr.isEmpty()) {
+            System.out.println("Invalid booking ID!");
             return;
         }
 
+        // ① Fetch saved payment methods from DB
+        System.out.println("\nFetching your saved payment methods...");
+        String methodId = null;
+        String paymentMethodDisplay = null;
+
+        try {
+            HttpResponse<String> listResp = apiGet(apiBaseUrl + "/payment-methods/list?clientId=" + currentUserId);
+
+            if (listResp.statusCode() == 200) {
+                List<Map<String, String>> savedMethods = extractArray(listResp.body(), "methods");
+
+                if (!savedMethods.isEmpty()) {
+                    // Show saved payment methods
+                    System.out.println("\nYour saved payment methods:");
+                    for (int i = 0; i < savedMethods.size(); i++) {
+                        Map<String, String> m = savedMethods.get(i);
+                        System.out.printf("%d. %s  [%s]%n",
+                            i + 1,
+                            m.getOrDefault("paymentType", "?"),
+                            m.getOrDefault("details", "****"));
+                    }
+                    System.out.println((savedMethods.size() + 1) + ". Add a new payment method");
+                    System.out.print("Choose (1-" + (savedMethods.size() + 1) + "): ");
+                    String choice = scanner.nextLine().trim();
+
+                    int idx;
+                    try {
+                        idx = Integer.parseInt(choice) - 1;
+                    } catch (NumberFormatException e) {
+                        System.out.println("Invalid choice!");
+                        return;
+                    }
+
+                    if (idx >= 0 && idx < savedMethods.size()) {
+                        // Use saved method
+                        methodId = savedMethods.get(idx).get("methodId");
+                        paymentMethodDisplay = savedMethods.get(idx).get("paymentType");
+                    }
+                    // idx == savedMethods.size() → falls through to add-new below
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("Warning: could not fetch saved payment methods: " + e.getMessage());
+        }
+
+        // ② Add new payment method if no saved ones or user chose to add
+        if (methodId == null) {
+            System.out.println("\nAdd a new payment method:");
+            System.out.println("1. Credit Card");
+            System.out.println("2. Debit Card");
+            System.out.println("3. PayPal");
+            System.out.println("4. Bank Transfer");
+            System.out.print("Choose type (1-4): ");
+            String typeChoice = scanner.nextLine().trim();
+
+            String paymentType;
+            Map<String, String> details = new HashMap<>();
+            switch (typeChoice) {
+                case "1":
+                    paymentType = "CreditCard";
+                    System.out.print("Enter card number (16 digits): ");
+                    details.put("cardNumber", scanner.nextLine().trim());
+                    System.out.print("Enter expiry (MM/YY): ");
+                    details.put("expiry", scanner.nextLine().trim());
+                    System.out.print("Enter CVV: ");
+                    details.put("cvv", scanner.nextLine().trim());
+                    System.out.print("Enter cardholder name: ");
+                    details.put("cardholderName", scanner.nextLine().trim());
+                    break;
+                case "2":
+                    paymentType = "DebitCard";
+                    System.out.print("Enter card number (16 digits): ");
+                    details.put("cardNumber", scanner.nextLine().trim());
+                    System.out.print("Enter expiry (MM/YY): ");
+                    details.put("expiry", scanner.nextLine().trim());
+                    System.out.print("Enter CVV: ");
+                    details.put("cvv", scanner.nextLine().trim());
+                    System.out.print("Enter cardholder name: ");
+                    details.put("cardholderName", scanner.nextLine().trim());
+                    break;
+                case "3":
+                    paymentType = "PayPal";
+                    System.out.print("Enter PayPal email: ");
+                    details.put("email", scanner.nextLine().trim());
+                    break;
+                case "4":
+                    paymentType = "BankTransfer";
+                    System.out.print("Enter account number: ");
+                    details.put("accountNumber", scanner.nextLine().trim());
+                    System.out.print("Enter routing number: ");
+                    details.put("routingNumber", scanner.nextLine().trim());
+                    System.out.print("Enter bank name: ");
+                    details.put("bankName", scanner.nextLine().trim());
+                    System.out.print("Enter account holder name: ");
+                    details.put("accountHolderName", scanner.nextLine().trim());
+                    break;
+                default:
+                    System.out.println("Invalid payment type!");
+                    return;
+            }
+
+            // Generate masked details using the same method as addPaymentMethod
+            String maskedDetails = getMaskedPaymentInfoForStorage(paymentType, details);
+
+            // Save to DB
+            try {
+                String jsonData = "{\"clientId\":\"" + currentUserId +
+                    "\",\"paymentType\":\"" + paymentType +
+                    "\",\"maskedDetails\":\"" + maskedDetails + "\"}";
+                HttpResponse<String> addResp = apiPost(apiBaseUrl + "/payment-methods/add", jsonData);
+
+                if (addResp.statusCode() == 200 && addResp.body().contains("\"success\":true")) {
+                    methodId = extractJsonValue(addResp.body(), "methodId");
+                    paymentMethodDisplay = paymentType;
+                    System.out.println("Payment method saved! ID: " + methodId);
+                } else {
+                    String error = extractJsonValue(addResp.body(), "error");
+                    System.out.println("Failed to save payment method: " + (error != null ? error : addResp.body()));
+                    return;
+                }
+            } catch (Exception e) {
+                System.out.println("Error saving payment method: " + e.getMessage());
+                return;
+            }
+        }
+
+        // ③ Process payment using the selected/saved method
         try {
             String jsonData = "{\"bookingId\":\"" + bookingIdStr +
-                "\",\"paymentMethod\":\"" + paymentMethod +
-                "\",\"amount\":" + amount + "}";
+                "\",\"clientId\":\"" + currentUserId +
+                "\",\"methodId\":\"" + methodId + "\"}";
 
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/payments/pay"))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonData))
-                .header("Content-Type", "application/json")
-                .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = apiPost(apiBaseUrl + "/payments/pay", jsonData);
             if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
                 String paymentId = extractJsonValue(response.body(), "paymentId");
-                System.out.println("Payment successful! Transaction ID: " + paymentId);
+                String amount = extractJsonValue(response.body(), "amount");
+                System.out.println("Payment successful!");
+                System.out.println("  Transaction ID: " + paymentId);
+                System.out.println("  Amount: $" + amount);
+                System.out.println("  Method: " + paymentMethodDisplay);
             } else {
                 String error = extractJsonValue(response.body(), "error");
                 System.out.println("Payment failed: " + (error != null ? error : response.body()));
@@ -1075,45 +1328,40 @@ public class BookingUI {
                 return;
         }
 
+        // FIX: Verify currentUserId is set before any DB operation
+        if (currentUserId == null || currentUserId.isEmpty()) {
+            System.out.println("Error: Not logged in. Cannot add payment method.");
+            return;
+        }
+
         // Try API first
         try {
             // Build masked details for storage
             String maskedDetails = getMaskedPaymentInfoForStorage(type, details);
-            
-            String jsonData = "{\"clientId\":\"" + currentUserId + "\",\"paymentType\":\"" + 
+
+            // FIX: Use currentUserId directly — it's already the real DB UUID from login/register
+            String jsonData = "{\"clientId\":\"" + currentUserId + "\",\"paymentType\":\"" +
                 type + "\",\"maskedDetails\":\"" + maskedDetails + "\"}";
 
-            System.out.println("Sending payment method request to: " + apiBaseUrl + "/payment-methods/add");
-            System.out.println("Request data: " + jsonData);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/payment-methods/add"))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonData))
-                .header("Content-Type", "application/json")
-                .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-            System.out.println("API Response status: " + response.statusCode());
-            System.out.println("API Response body: " + response.body());
+            HttpResponse<String> response = apiPost(apiBaseUrl + "/payment-methods/add", jsonData);
 
             if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
                 System.out.println("\n✓ Payment method added successfully to database!");
                 return;
             } else {
-                System.out.println("API failed (status: " + response.statusCode() + "), using local storage...");
+                String error = extractJsonValue(response.body(), "error");
+                System.out.println("API failed (status: " + response.statusCode()
+                    + "): " + (error != null ? error : response.body()));
             }
         } catch (Exception e) {
             System.out.println("Error connecting to API: " + e.getMessage());
-            e.printStackTrace();
-            System.out.println("Using local storage...");
         }
 
-        // Fallback to local
+        // Fallback to local (in-memory only — DB may be unavailable)
         try {
             PaymentMethod method = clientService.addPaymentMethod(client, type, details);
             if (method != null) {
-                System.out.println("\n✓ Payment method added successfully!");
+                System.out.println("\n✓ Payment method added locally (DB unavailable).");
                 System.out.println("Type: " + method);
             } else {
                 System.out.println("\n✗ Failed to add payment method.");
@@ -1125,36 +1373,109 @@ public class BookingUI {
 
     private void viewPaymentMethods(Client client) {
         System.out.println("\n--- Your Payment Methods ---");
-        List<Map<String, Object>> methods = clientService.getClientPaymentMethods(client);
 
-        if (methods.isEmpty()) {
-            System.out.println("No payment methods found. Please add a payment method first.");
-            return;
+        // Try to load from database first
+        boolean loadedFromDb = false;
+        try {
+            HttpResponse<String> response = apiGet(apiBaseUrl + "/payment-methods/list?clientId=" + currentUserId);
+            if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
+                List<Map<String, String>> dbMethods = extractArray(response.body(), "methods");
+                if (!dbMethods.isEmpty()) {
+                    System.out.println("You have " + dbMethods.size() + " payment method(s):");
+                    int idx = 1;
+                    for (Map<String, String> m : dbMethods) {
+                        String type = m.getOrDefault("paymentType", "Unknown");
+                        String details = m.getOrDefault("details", "");
+                        System.out.printf("%d. %s - %s%n", idx++, type, details);
+                    }
+                    loadedFromDb = true;
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("Could not load from database: " + e.getMessage());
         }
 
-        System.out.println("You have " + methods.size() + " payment method(s):");
-        int i = 1;
-        for (Map<String, Object> paymentInfo : methods) {
-            PaymentMethod method = (PaymentMethod) paymentInfo.get("method");
-            @SuppressWarnings("unchecked")
-            Map<String, String> details = (Map<String, String>) paymentInfo.get("details");
-            String displayInfo = getMaskedPaymentInfo(method, details);
-            System.out.printf("%d. %s - %s%n", i++, method, displayInfo);
+        // Fallback to local
+        if (!loadedFromDb) {
+            List<Map<String, Object>> methods = clientService.getClientPaymentMethods(client);
+            if (methods.isEmpty()) {
+                System.out.println("No payment methods found. Please add a payment method first.");
+                return;
+            }
+            System.out.println("You have " + methods.size() + " payment method(s):");
+            int i = 1;
+            for (Map<String, Object> paymentInfo : methods) {
+                PaymentMethod method = (PaymentMethod) paymentInfo.get("method");
+                @SuppressWarnings("unchecked")
+                Map<String, String> details = (Map<String, String>) paymentInfo.get("details");
+                String displayInfo = getMaskedPaymentInfo(method, details);
+                System.out.printf("%d. %s - %s%n", i++, method, displayInfo);
+            }
         }
     }
 
     private void removePaymentMethod(Client client) {
         System.out.println("\n--- Remove Payment Method ---");
-        List<Map<String, Object>> methods = clientService.getClientPaymentMethods(client);
 
-        if (methods.isEmpty()) {
+        // Step 1: fetch list — try DB first, fallback to local
+        List<Map<String, String>> dbMethods = null;
+        List<Map<String, Object>> localMethods = null;
+
+        try {
+            HttpResponse<String> response = apiGet(apiBaseUrl + "/payment-methods/list?clientId=" + currentUserId);
+            if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
+                dbMethods = extractArray(response.body(), "methods");
+            }
+        } catch (Exception e) {
+            System.out.println("Could not load from database: " + e.getMessage());
+        }
+
+        if (dbMethods != null && !dbMethods.isEmpty()) {
+            // Use DB data
+            System.out.println("Your payment methods:");
+            for (int i = 0; i < dbMethods.size(); i++) {
+                Map<String, String> m = dbMethods.get(i);
+                System.out.printf("%d. %s - %s%n", i + 1, m.getOrDefault("paymentType", "?"), m.getOrDefault("details", ""));
+            }
+
+            System.out.print("\nEnter the number to remove (1-" + dbMethods.size() + ", or 0 to cancel): ");
+            String input = scanner.nextLine();
+            try {
+                int sel = Integer.parseInt(input);
+                if (sel == 0) {
+                    System.out.println("Cancelled.");
+                    return;
+                }
+                if (sel < 1 || sel > dbMethods.size()) {
+                    System.out.println("Invalid selection.");
+                    return;
+                }
+
+                Map<String, String> chosen = dbMethods.get(sel - 1);
+                String methodId = chosen.getOrDefault("methodId", "");
+                String jsonData = "{\"methodId\":\"" + methodId + "\",\"clientId\":\"" + currentUserId + "\"}";
+                HttpResponse<String> delResp = apiPost(apiBaseUrl + "/payment-methods/remove", jsonData);
+
+                if (delResp.statusCode() == 200 && delResp.body().contains("\"success\":true")) {
+                    System.out.println("✓ Payment method removed from database!");
+                    return;
+                } else {
+                    System.out.println("DB removal failed — falling back to local...");
+                }
+            } catch (Exception e) {
+                System.out.println("Error: " + e.getMessage() + " — falling back to local...");
+            }
+        }
+
+        // Fallback to local
+        localMethods = clientService.getClientPaymentMethods(client);
+        if (localMethods.isEmpty()) {
             System.out.println("No payment methods to remove.");
             return;
         }
-
         System.out.println("Your payment methods:");
         int i = 1;
-        for (Map<String, Object> paymentInfo : methods) {
+        for (Map<String, Object> paymentInfo : localMethods) {
             PaymentMethod method = (PaymentMethod) paymentInfo.get("method");
             @SuppressWarnings("unchecked")
             Map<String, String> details = (Map<String, String>) paymentInfo.get("details");
@@ -1162,41 +1483,60 @@ public class BookingUI {
             System.out.printf("%d. %s - %s%n", i++, method, displayInfo);
         }
 
-        System.out.print("\nEnter the number of the payment method to remove (1-" + methods.size() + ", or 0 to cancel): ");
+        System.out.print("\nEnter the number to remove (1-" + localMethods.size() + ", or 0 to cancel): ");
         String input = scanner.nextLine();
 
         try {
             int index = Integer.parseInt(input) - 1;
-
             if (index == -1) {
-                System.out.println("Removal cancelled.");
+                System.out.println("Cancelled.");
                 return;
             }
-
-            if (index >= 0 && index < methods.size()) {
+            if (index >= 0 && index < localMethods.size()) {
                 boolean success = clientService.removePaymentMethod(client, index);
-                if (success) {
-                    System.out.println("✓ Payment method removed successfully!");
-                } else {
-                    System.out.println("✗ Failed to remove payment method.");
-                }
+                System.out.println(success ? "✓ Payment method removed!" : "✗ Failed to remove.");
             } else {
-                System.out.println("Invalid selection! Please enter a number between 1 and " + methods.size() + ".");
+                System.out.println("Invalid selection.");
             }
         } catch (NumberFormatException e) {
-            System.out.println("Invalid input! Please enter a number.");
+            System.out.println("Invalid input.");
         }
     }
 
     private void viewPaymentHistory(Client client) {
         System.out.println("\n=== Payment History ===");
-        List<backend.payment.PaymentTransaction> transactions = clientService.viewPaymentHistory(client);
 
+        // Try API first
+        try {
+            HttpResponse<String> response = apiGet(apiBaseUrl + "/payments/history?clientId=" + currentUserId);
+            if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
+                List<Map<String, String>> payments = extractArray(response.body(), "payments");
+                if (payments.isEmpty()) {
+                    System.out.println("No payment history found.");
+                    return;
+                }
+                System.out.println("Your payment transactions:");
+                int i = 1;
+                for (Map<String, String> p : payments) {
+                    System.out.printf("%d. Transaction ID: %s | Amount: $%s | Method: %s | Status: %s%n",
+                        i++,
+                        p.getOrDefault("paymentId", "?"),
+                        p.getOrDefault("amount", "?"),
+                        p.getOrDefault("paymentMethod", "?"),
+                        p.getOrDefault("status", "?"));
+                }
+                return;
+            }
+        } catch (Exception e) {
+            System.out.println("Could not load from API: " + e.getMessage());
+        }
+
+        // Fallback to local
+        List<backend.payment.PaymentTransaction> transactions = clientService.viewPaymentHistory(client);
         if (transactions.isEmpty()) {
             System.out.println("No payment history found.");
             return;
         }
-
         System.out.println("Your payment transactions:");
         int i = 1;
         for (backend.payment.PaymentTransaction transaction : transactions) {
@@ -1231,13 +1571,7 @@ public class BookingUI {
             // Call backend API
             try {
                 String jsonData = "{\"message\":\"" + userInput.replace("\"", "\\\"") + "\"}";
-                HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(apiBaseUrl + "/ai/chat"))
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonData))
-                    .header("Content-Type", "application/json")
-                    .build();
-
-                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                HttpResponse<String> response = apiPost(apiBaseUrl + "/ai/chat", jsonData);
 
                 if (response.statusCode() == 200) {
                     String responseBody = response.body();
@@ -1260,35 +1594,45 @@ public class BookingUI {
     private void viewConsultantBookings(Consultant consultant) {
         System.out.println("\n=== My Bookings ===");
 
-        // Try API first, fallback to local
-        List<Booking> bookings = null;
+        // Try API first
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/bookings/consultant?consultantId=" + currentUserId))
-                .GET()
-                .build();
+            HttpResponse<String> response = apiGet(apiBaseUrl + "/bookings/consultant?consultantId=" + currentUserId);
+            if (response.statusCode() == 200 && response.body().contains("\"bookings\":")) {
+                int arrayStart = response.body().indexOf("[", response.body().indexOf("\"bookings\":"));
+                int arrayEnd = response.body().lastIndexOf("]");
+                String bookingsJson = response.body().substring(arrayStart, arrayEnd + 1);
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 200) {
-                System.out.println("Loading from server...");
-                // Parse API response - for now fall back to local
+                if (bookingsJson.equals("[]")) {
+                    System.out.println("No bookings found.");
+                    return;
+                }
+
+                List<Map<String, String>> bookings = extractArray(response.body(), "bookings");
+                int count = 0;
+                for (Map<String, String> b : bookings) {
+                    count++;
+                    System.out.printf("%d. ID: %s | Client: %s | Service: %s | Time: %s | Status: %s%n",
+                        count,
+                        b.getOrDefault("bookingId", "?"),
+                        b.getOrDefault("clientName", "?"),
+                        b.getOrDefault("serviceName", "?"),
+                        b.getOrDefault("startTime", "?"),
+                        b.getOrDefault("status", "?"));
+                }
+                return;
             }
         } catch (Exception e) {
-            System.out.println("Using local data...");
+            System.out.println("Could not load from API: " + e.getMessage());
         }
 
         // Fallback to local
-        if (bookings == null) {
-            bookings = consultingService.getConsultantBookings(consultant);
-        }
-
+        List<Booking> bookings = consultingService.getConsultantBookings(consultant);
         if (bookings.isEmpty()) {
             System.out.println("No bookings found.");
             return;
         }
-
         for (Booking booking : bookings) {
-            System.out.printf("ID: %s | Client: %s | Service: %s | Time: %s | State: %s%n",
+            System.out.printf("ID: %s | Client: %s | Service: %s | Time: %s | Status: %s%n",
                     booking.getBookingId(),
                     booking.getClient().getName(),
                     booking.getService().getName(),
@@ -1300,24 +1644,23 @@ public class BookingUI {
     private void acceptBooking(Consultant consultant) {
         System.out.println("\n=== Accept Booking ===");
         System.out.print("Enter booking ID: ");
-        String bookingIdStr = scanner.nextLine();
+        String bookingIdStr = scanner.nextLine().trim();
 
-        // Try API first
+        // Try API first — pass consultantId so backend can verify ownership
         try {
-            String jsonData = "{\"bookingId\":\"" + bookingIdStr + "\"}";
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/bookings/confirm"))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonData))
-                .header("Content-Type", "application/json")
-                .build();
+            String jsonData = "{\"bookingId\":\"" + bookingIdStr + "\",\"consultantId\":\"" + currentUserId + "\"}";
+            HttpResponse<String> response = apiPost(apiBaseUrl + "/bookings/confirm", jsonData);
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
                 System.out.println("Booking accepted successfully!");
                 return;
+            } else {
+                String error = extractJsonValue(response.body(), "error");
+                System.out.println("Failed to accept: " + (error != null ? error : response.body()));
+                return;
             }
         } catch (Exception e) {
-            // Fallback to local
+            System.out.println("API error: " + e.getMessage());
         }
 
         // Fallback to local
@@ -1340,24 +1683,23 @@ public class BookingUI {
     private void rejectBooking(Consultant consultant) {
         System.out.println("\n=== Reject Booking ===");
         System.out.print("Enter booking ID: ");
-        String bookingIdStr = scanner.nextLine();
+        String bookingIdStr = scanner.nextLine().trim();
 
-        // Try API
+        // Try API — pass consultantId so backend can verify ownership
         try {
-            String jsonData = "{\"bookingId\":\"" + bookingIdStr + "\"}";
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/bookings/reject"))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonData))
-                .header("Content-Type", "application/json")
-                .build();
+            String jsonData = "{\"bookingId\":\"" + bookingIdStr + "\",\"consultantId\":\"" + currentUserId + "\"}";
+            HttpResponse<String> response = apiPost(apiBaseUrl + "/bookings/reject", jsonData);
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
                 System.out.println("Booking rejected successfully!");
                 return;
+            } else {
+                String error = extractJsonValue(response.body(), "error");
+                System.out.println("Failed to reject: " + (error != null ? error : response.body()));
+                return;
             }
         } catch (Exception e) {
-            // Fallback
+            System.out.println("API error: " + e.getMessage());
         }
 
         // Fallback to local
@@ -1380,24 +1722,23 @@ public class BookingUI {
     private void completeBooking(Consultant consultant) {
         System.out.println("\n=== Complete Booking ===");
         System.out.print("Enter booking ID: ");
-        String bookingIdStr = scanner.nextLine();
+        String bookingIdStr = scanner.nextLine().trim();
 
-        // Try API
+        // Try API — pass consultantId so backend can verify ownership
         try {
-            String jsonData = "{\"bookingId\":\"" + bookingIdStr + "\"}";
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/bookings/complete"))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonData))
-                .header("Content-Type", "application/json")
-                .build();
+            String jsonData = "{\"bookingId\":\"" + bookingIdStr + "\",\"consultantId\":\"" + currentUserId + "\"}";
+            HttpResponse<String> response = apiPost(apiBaseUrl + "/bookings/complete", jsonData);
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
                 System.out.println("Booking completed successfully!");
                 return;
+            } else {
+                String error = extractJsonValue(response.body(), "error");
+                System.out.println("Failed to complete: " + (error != null ? error : response.body()));
+                return;
             }
         } catch (Exception e) {
-            // Fallback
+            System.out.println("API error: " + e.getMessage());
         }
 
         // Fallback to local
@@ -1436,13 +1777,7 @@ public class BookingUI {
             System.out.println("Sending availability request to: " + apiBaseUrl + "/availability/set");
             System.out.println("Request data: " + jsonData);
 
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/availability/set"))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonData))
-                .header("Content-Type", "application/json")
-                .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = apiPost(apiBaseUrl + "/availability/set", jsonData);
 
             System.out.println("API Response status: " + response.statusCode());
             System.out.println("API Response body: " + response.body());
@@ -1471,33 +1806,26 @@ public class BookingUI {
         System.out.print("Enter consultant email: ");
         String email = scanner.nextLine();
 
-        // Try API first
+        // FIX: Pass currentUserId so ApiServer can verify the admin is authenticated
         try {
-            String jsonData = "{\"email\":\"" + email + "\"}";
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/users/approve-consultant"))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonData))
-                .header("Content-Type", "application/json")
-                .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            String jsonData = "{\"email\":\"" + email + "\",\"adminId\":\"" + currentUserId + "\"}";
+            HttpResponse<String> response = apiPost(apiBaseUrl + "/users/approve-consultant", jsonData);
             if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
                 System.out.println("Consultant approved successfully!");
                 return;
+            } else {
+                String error = extractJsonValue(response.body(), "error");
+                System.out.println("API approve failed: " + (error != null ? error : response.body()));
             }
         } catch (Exception e) {
-            // Fallback to local
+            System.out.println("Error connecting to API: " + e.getMessage());
         }
 
         // Fallback to local
         Consultant consultant = userService.getConsultantByEmail(email);
         if (consultant != null) {
-            boolean success = userService.approveConsultant(email);
-            if (success) {
-                System.out.println("Consultant " + consultant.getName() + " has been approved and can now login!");
-            } else {
-                System.out.println("Failed to approve consultant.");
-            }
+            userService.approveConsultant(consultant);
+            System.out.println("Consultant " + consultant.getName() + " has been approved and can now login!");
         } else {
             System.out.println("Consultant not found!");
         }
@@ -1510,31 +1838,24 @@ public class BookingUI {
 
         // Try API
         try {
-            String jsonData = "{\"email\":\"" + email + "\"}";
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/users/reject-consultant"))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonData))
-                .header("Content-Type", "application/json")
-                .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            String jsonData = "{\"email\":\"" + email + "\",\"adminId\":\"" + currentUserId + "\"}";
+            HttpResponse<String> response = apiPost(apiBaseUrl + "/users/reject-consultant", jsonData);
             if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
                 System.out.println("Consultant rejected successfully!");
                 return;
+            } else {
+                String error = extractJsonValue(response.body(), "error");
+                System.out.println("API reject failed: " + (error != null ? error : response.body()));
             }
         } catch (Exception e) {
-            // Fallback
+            System.out.println("Error connecting to API: " + e.getMessage());
         }
 
         // Fallback to local
         Consultant consultant = userService.getConsultantByEmail(email);
         if (consultant != null) {
-            boolean success = userService.rejectConsultant(email);
-            if (success) {
-                System.out.println("Consultant " + consultant.getName() + " has been rejected.");
-            } else {
-                System.out.println("Failed to reject consultant.");
-            }
+            userService.rejectConsultant(consultant);
+            System.out.println("Consultant " + consultant.getName() + " has been rejected.");
         } else {
             System.out.println("Consultant not found!");
         }
@@ -1543,7 +1864,55 @@ public class BookingUI {
     private void viewPendingConsultants() {
         System.out.println("\n=== Pending Consultants ===");
 
-        // Debug output
+        // Try API first — use dedicated pending-consultants endpoint
+        try {
+            HttpResponse<String> response = apiGet(apiBaseUrl + "/users/pending-consultants");
+            if (response.statusCode() == 200 && response.body().contains("\"success\":true")) {
+                List<Map<String, String>> pending = extractArray(response.body(), "consultants");
+
+                System.out.println("Total pending consultants: " + pending.size());
+
+                if (pending.isEmpty()) {
+                    System.out.println("No pending consultants waiting for approval.");
+                    return;
+                }
+
+                System.out.println("\nConsultants waiting for approval:");
+                int i = 1;
+                for (Map<String, String> c : pending) {
+                    String name = c.get("name");
+                    String email = c.get("email");
+                    String userId = c.get("userId");
+                    
+                    // Debug: print raw values if name or email is missing
+                    if (name == null || name.trim().isEmpty()) {
+                        System.out.println("[DEBUG] Missing name for consultant " + userId + ", full data: " + c);
+                        name = "Unknown";
+                    }
+                    if (email == null || email.trim().isEmpty()) {
+                        System.out.println("[DEBUG] Missing email for consultant " + userId);
+                        email = "unknown@email.com";
+                    }
+                    
+                    System.out.printf("%d. %s - %s (ID: %s)%n",
+                        i++,
+                        name,
+                        email,
+                        userId != null ? userId : "N/A");
+                }
+
+                System.out.println("\nTo approve or reject, use options 1 or 2 from the admin menu.");
+                return;
+            } else if (response.statusCode() == 403) {
+                System.out.println("Error: Admin access required.");
+                return;
+            }
+        } catch (Exception e) {
+            System.out.println("Could not load from API: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        // Fallback to local
         System.out.println("Total registered consultants: " + userService.getAllConsultants().size());
         Collection<Consultant> allConsultants = userService.getAllConsultants();
         for (Consultant c : allConsultants) {
@@ -1575,25 +1944,86 @@ public class BookingUI {
         System.out.println("          SYSTEM STATUS DASHBOARD");
         System.out.println("===========================================");
 
-        Map<String, Object> status = adminService.getSystemStatus();
+        // Fetch real counts from database via API
+        int totalClients = 0, totalConsultants = 0, totalApproved = 0, totalPending = 0, totalServices = 0;
+
+        try {
+            // Count clients
+            HttpResponse<String> clientResp = apiGet(apiBaseUrl + "/users/clients");
+            if (clientResp.statusCode() == 200) {
+                List<Map<String, String>> clients = extractArray(clientResp.body(), "clients");
+                totalClients = clients.size();
+            }
+        } catch (Exception e) {
+            System.out.println("Could not load clients count: " + e.getMessage());
+        }
+
+        try {
+            // Count consultants
+            HttpResponse<String> consultantResp = apiGet(apiBaseUrl + "/users/consultants");
+            if (consultantResp.statusCode() == 200) {
+                List<Map<String, String>> consultants = extractArray(consultantResp.body(), "consultants");
+                totalConsultants = consultants.size();
+                for (Map<String, String> c : consultants) {
+                    if ("true".equalsIgnoreCase(c.getOrDefault("isApproved", "false"))) totalApproved++;
+                    else totalPending++;
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("Could not load consultants count: " + e.getMessage());
+        }
+
+        try {
+            // Count services
+            HttpResponse<String> svcResp = apiGet(apiBaseUrl + "/services");
+            if (svcResp.statusCode() == 200) {
+                List<Map<String, String>> services = extractArray(svcResp.body(), "services");
+                totalServices = services.size();
+            }
+        } catch (Exception e) {
+            System.out.println("Could not load services count: " + e.getMessage());
+        }
+
+        boolean dbConnected = false;
+        try {
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(apiBaseUrl + "/health")).GET().build();
+            HttpResponse<String> health = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            dbConnected = (health.statusCode() == 200);
+        } catch (Exception ignored) {}
+
+        // Fallback to local data if API returned nothing
+        if (totalClients == 0 && totalConsultants == 0) {
+            System.out.println("API unavailable — showing local (offline) statistics.");
+            Map<String, Object> localStatus = adminService.getSystemStatus();
+            totalClients = (Integer) localStatus.getOrDefault("total_clients", 0);
+            totalConsultants = (Integer) localStatus.getOrDefault("total_consultants", 0);
+            totalApproved = (Integer) localStatus.getOrDefault("approved_consultants", 0);
+            totalPending = (Integer) localStatus.getOrDefault("pending_consultants", 0);
+            totalServices = (Integer) localStatus.getOrDefault("total_services", 0);
+        }
 
         System.out.println("\n--- User Statistics ---");
-        System.out.printf("Total Users: %d%n", status.get("total_users"));
-        System.out.printf("Total Clients: %d%n", status.get("total_clients"));
-        System.out.printf("Total Consultants: %d%n", status.get("total_consultants"));
-        System.out.printf("  - Approved: %d%n", status.get("approved_consultants"));
-        System.out.printf("  - Pending Approval: %d%n", status.get("pending_consultants"));
+        System.out.printf("Total Users: %d%n", totalClients + totalConsultants + 1); // +1 admin
+        System.out.printf("Total Clients: %d%n", totalClients);
+        System.out.printf("Total Consultants: %d%n", totalConsultants);
+        System.out.printf("  - Approved: %d%n", totalApproved);
+        System.out.printf("  - Pending Approval: %d%n", totalPending);
 
         System.out.println("\n--- Service Information ---");
-        System.out.printf("Total Services Available: %d%n", status.get("total_services"));
+        System.out.printf("Total Services Available: %d%n", Math.max(totalServices, availableServices.size()));
 
         System.out.println("\n--- Active Policies ---");
-        System.out.printf("Cancellation Policy: %s%n", status.get("cancellation_policy"));
-        System.out.printf("Pricing Strategy: %s%n", status.get("pricing_strategy"));
+        try {
+            Map<String, Object> localStatus = adminService.getSystemStatus();
+            System.out.printf("Cancellation Policy: %s%n", localStatus.getOrDefault("cancellation_policy", "?"));
+            System.out.printf("Pricing Strategy: %s%n", localStatus.getOrDefault("pricing_strategy", "?"));
+        } catch (Exception e) {
+            System.out.println("Cancellation Policy: ?");
+            System.out.println("Pricing Strategy: ?");
+        }
 
         System.out.println("\n--- System Health ---");
-        System.out.println("Database Connection: " +
-            (backend.database.DatabaseConnection.getInstance().isConnected() ? "✓ Connected" : "✗ Disconnected"));
+        System.out.println("Database Connection: " + (dbConnected ? "✓ Connected" : "✗ Disconnected"));
         System.out.println("System Status: ✓ Operational");
 
         System.out.println("\n===========================================");
@@ -1917,16 +2347,94 @@ public class BookingUI {
     }
 
     /**
-     * Helper method to extract simple JSON value
+     * Escape special characters for JSON string values.
+     */
+    private String escapeJson(String raw) {
+        if (raw == null) return "";
+        return raw.replace("\\", "\\\\")
+                  .replace("\"", "\\\"")
+                  .replace("\n", "\\n")
+                  .replace("\r", "\\r")
+                  .replace("\t", "\\t");
+    }
+
+    /**
+     * Safely parse an integer from user input with validation.
+     * @param input the raw input string
+     * @param min minimum allowed value (inclusive), use Integer.MIN_VALUE for no min
+     * @param max maximum allowed value (inclusive), use Integer.MAX_VALUE for no max
+     * @param fieldName name of the field for error messages
+     * @return parsed integer, or null if invalid
+     */
+    private Integer safeParseInt(String input, int min, int max, String fieldName) {
+        if (input == null || input.trim().isEmpty()) {
+            System.out.println(fieldName + " cannot be empty.");
+            return null;
+        }
+        try {
+            int value = Integer.parseInt(input.trim());
+            if (value < min || value > max) {
+                System.out.println(fieldName + " must be between " + min + " and " + max + ".");
+                return null;
+            }
+            return value;
+        } catch (NumberFormatException e) {
+            System.out.println("Invalid " + fieldName.toLowerCase() + "! Please enter a valid number.");
+            return null;
+        }
+    }
+
+    /**
+     * Helper method to extract simple JSON value with proper nested-brace awareness.
+     * Finds the key within the nearest enclosing {} block only.
      * @param json JSON string
      * @param key Key to extract
      * @return Extracted value or empty string
      */
     private String extractJsonValue(String json, String key) {
-        if (json == null || key == null) return "";
+        if (json == null || key == null || json.isEmpty()) return "";
 
         String searchKey = "\"" + key + "\":";
         int keyIndex = json.indexOf(searchKey);
+        if (keyIndex == -1) return "";
+
+        // Walk backward from key to find the { that opens this object's scope
+        int braceStart = -1;
+        int searchDepth = 0;
+        for (int i = keyIndex - 1; i >= 0; i--) {
+            char c = json.charAt(i);
+            if (c == '}') searchDepth++;
+            else if (c == '{') {
+                if (searchDepth == 0) { braceStart = i; break; }
+                searchDepth--;
+            }
+        }
+
+        // Now find the matching closing brace for this object
+        int braceEnd = json.length();
+        if (braceStart >= 0) {
+            int braceDepth = 0;
+            for (int i = braceStart; i < json.length(); i++) {
+                char c = json.charAt(i);
+                if (c == '{') braceDepth++;
+                else if (c == '}') {
+                    braceDepth--;
+                    if (braceDepth == 0) { braceEnd = i; break; }
+                }
+            }
+        }
+
+        // Re-search for key within the correct scope only
+        int scopeStart = (braceStart >= 0) ? braceStart : 0;
+        int scopeJson = keyIndex;
+        keyIndex = -1;
+        for (int i = scopeStart; i <= scopeJson; i++) {
+            int found = json.indexOf(searchKey, i);
+            if (found != -1 && found <= scopeJson) {
+                keyIndex = found;
+                break;
+            }
+        }
         if (keyIndex == -1) return "";
 
         int startIndex = keyIndex + searchKey.length();
@@ -1935,26 +2443,175 @@ public class BookingUI {
         while (startIndex < json.length() && Character.isWhitespace(json.charAt(startIndex))) {
             startIndex++;
         }
-
         if (startIndex >= json.length()) return "";
 
         char startChar = json.charAt(startIndex);
 
         if (startChar == '"') {
-            // String value
+            // String value — find closing " outside of escaped sequences
             startIndex++;
-            int endIndex = json.indexOf('"', startIndex);
-            return endIndex > startIndex ? json.substring(startIndex, endIndex) : "";
-        } else if (startChar == 't' || startChar == 'f') {
-            // Boolean value
-            int endIndex = json.indexOf(',', startIndex);
-            if (endIndex == -1) endIndex = json.indexOf('}', startIndex);
-            return endIndex > startIndex ? json.substring(startIndex, endIndex) : "";
+            int endIndex = startIndex;
+            while (endIndex < json.length()) {
+                if (json.charAt(endIndex) == '"') break;
+                if (json.charAt(endIndex) == '\\') endIndex++; // skip escaped char
+                endIndex++;
+            }
+            return (endIndex > startIndex && endIndex < json.length())
+                ? json.substring(startIndex, endIndex) : "";
+        } else if (startChar == '{' || startChar == '[') {
+            // Nested object/array — skip the whole block
+            int depth = 0;
+            for (int i = startIndex; i < json.length(); i++) {
+                char c = json.charAt(i);
+                if (c == '{' || c == '[') depth++;
+                else if (c == '}' || c == ']') {
+                    depth--;
+                    if (depth == 0) return json.substring(startIndex, i + 1);
+                }
+            }
+            return "";
         } else {
-            // Number or other
-            int endIndex = json.indexOf(',', startIndex);
-            if (endIndex == -1) endIndex = json.indexOf('}', startIndex);
-            return endIndex > startIndex ? json.substring(startIndex, endIndex) : "";
+            // Number, boolean, null
+            int endIndex = startIndex;
+            while (endIndex < json.length()) {
+                char c = json.charAt(endIndex);
+                if (c == ',' || c == '}') break;
+                endIndex++;
+            }
+            return json.substring(startIndex, endIndex).trim();
+        }
+    }
+
+    /**
+     * Parse a JSON array field into a list of objects, each as a Map.
+     * Works correctly even when array elements contain nested objects.
+     * @param json   full JSON string containing the array field
+     * @param key    the array field name (e.g. "methods")
+     * @return list of Maps, each containing the fields of one array element
+     */
+    private List<Map<String, String>> extractArray(String json, String key) {
+        List<Map<String, String>> results = new ArrayList<>();
+        if (json == null || json.isEmpty() || key == null) return results;
+
+        try {
+            // Locate the key
+            String searchKey = "\"" + key + "\":";
+            int keyPos = json.indexOf(searchKey);
+            if (keyPos == -1) return results;
+
+            // Advance to opening '['
+            int arrStart = json.indexOf('[', keyPos + searchKey.length());
+            if (arrStart == -1) return results;
+
+            // Walk the array, matching {} depth
+            int i = arrStart + 1;
+            int depth = 0;
+            while (i < json.length()) {
+                char c = json.charAt(i);
+                if (c == '{') {
+                    if (depth == 0) {
+                        // Start of an object — find matching }
+                        int objStart = i;
+                        depth = 1;
+                        int j = i + 1;
+                        boolean inString = false;
+                        boolean escaped = false;
+
+                        while (j < json.length() && depth > 0) {
+                            char x = json.charAt(j);
+                            if (escaped) {
+                                escaped = false;
+                            } else if (x == '\\') {
+                                escaped = true;
+                            } else if (x == '"' && !escaped) {
+                                inString = !inString;
+                            } else if (!inString) {
+                                if (x == '{') depth++;
+                                else if (x == '}') depth--;
+                            }
+                            j++;
+                        }
+                        String objStr = json.substring(objStart, j);
+                        Map<String, String> map = new HashMap<>();
+                        parseFlatObject(objStr, map);
+                        results.add(map);
+                        i = j;
+                    } else {
+                        i++;
+                    }
+                } else if (c == ']' && depth == 0) {
+                    break;
+                } else {
+                    i++;
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Error parsing array: " + e.getMessage());
+        }
+        return results;
+    }
+
+    /**
+     * Parse a single flat JSON object (no deeply-nested values) into a Map.
+     * Handles: {"key":"stringValue"}  {"key":123}  {"key":true}  {"key":false}  {"key":null}
+     */
+    private void parseFlatObject(String obj, Map<String, String> out) {
+        int i = 0;
+        // Strip outer braces so the loop always starts at the first key
+        if (obj.length() >= 2 && obj.charAt(0) == '{' && obj.charAt(obj.length() - 1) == '}') {
+            i = 1;
+        }
+        while (i < obj.length()) {
+            // Skip whitespace / commas
+            while (i < obj.length() && (obj.charAt(i) == ' ' || obj.charAt(i) == ',')) i++;
+            if (i >= obj.length()) break;
+            if (obj.charAt(i) == '}') break;               // end of object
+            if (obj.charAt(i) != '"') { i++; continue; }   // skip noise, find next key
+
+            // Parse key: "keyname"
+            i++; // skip opening "
+            int keyStart = i;
+            while (i < obj.length() && obj.charAt(i) != '"') i++;
+            String key = obj.substring(keyStart, i);
+            i++; // skip closing "
+
+            // Find colon
+            while (i < obj.length() && obj.charAt(i) != ':') i++;
+            i++; // skip colon
+            while (i < obj.length() && obj.charAt(i) == ' ') i++; // skip whitespace
+
+            if (i >= obj.length()) break;
+
+            String value;
+            if (obj.charAt(i) == '"') {
+                // Quoted string value
+                i++; // skip opening "
+                int valStart = i;
+                value = "";
+                while (i < obj.length()) {
+                    if (obj.charAt(i) == '\\') {
+                        i += 2; // skip escaped char
+                    } else if (obj.charAt(i) == '"') {
+                        value = obj.substring(valStart, i);
+                        i++; // skip closing "
+                        break;
+                    } else {
+                        i++;
+                    }
+                }
+            } else {
+                // Unquoted: number, boolean, null — read until comma or }
+                int valStart = i;
+                while (i < obj.length()) {
+                    char c = obj.charAt(i);
+                    if (c == ',' || c == '}') break;
+                    i++;
+                }
+                value = obj.substring(valStart, i).trim();
+                if (value.isEmpty()) value = "";
+            }
+
+            out.put(key, value);
         }
     }
 }

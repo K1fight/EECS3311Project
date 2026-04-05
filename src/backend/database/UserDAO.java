@@ -131,7 +131,7 @@ public class UserDAO extends BaseDAO {
      * @return List of Consultant objects
      */
     public List<Consultant> getPendingConsultants() {
-        String sql = "SELECT * FROM users WHERE account_type = 'Consultant' AND is_approved = 0";
+        String sql = "SELECT * FROM users WHERE account_type = 'Consultant' AND is_approved = FALSE";
         List<Consultant> consultants = new ArrayList<>();
         
         try (ResultSet rs = executeQuery(sql)) {
@@ -196,13 +196,14 @@ public class UserDAO extends BaseDAO {
         String password = rs.getString("password");
         AccountType accountType = AccountType.valueOf(rs.getString("account_type"));
         boolean isApproved = rs.getBoolean("is_approved");
-        
+
+        UUID uuid = UUID.fromString(userId);
+
         return switch (accountType) {
-            case Admin -> new backend.user.Admin(name, email, password);
-            case Client -> new Client(name, email, password);
+            case Admin -> new backend.user.Admin(uuid, name, email, password);
+            case Client -> new Client(uuid, name, email, password);
             case Consultant -> {
-                Consultant consultant = new Consultant(name, email, password);
-                consultant.setApproved(isApproved);
+                Consultant consultant = new Consultant(uuid, name, email, password, isApproved);
                 yield consultant;
             }
         };

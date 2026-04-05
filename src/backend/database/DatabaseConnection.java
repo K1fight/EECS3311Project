@@ -1,7 +1,6 @@
 package backend.database;
 
-import java.io.FileInputStream;
-import java.io.IOException;
+import backend.EnvConfig;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -10,6 +9,7 @@ import java.util.Properties;
 /**
  * Database Connection Manager
  * Handles database connections using singleton pattern
+ * Configuration loaded from .env file via EnvConfig
  */
 public class DatabaseConnection {
     private static DatabaseConnection instance;
@@ -18,50 +18,13 @@ public class DatabaseConnection {
     private String username;
     private String password;
     
-    // Database configuration loaded from properties file
-    private Properties dbProperties;
-    
     private DatabaseConnection() {
-        this.dbProperties = new Properties();
-        loadDatabaseProperties();
-
-        // Environment variables override properties file (for Docker)
-        String dbHost = System.getenv("DB_HOST");
-        String dbPort = System.getenv("DB_PORT");
-        String dbName = System.getenv("DB_NAME");
-        String dbUser = System.getenv("DB_USER");
-        String dbPass = System.getenv("DB_PASSWORD");
-
-        if (dbHost != null) {
-            String port = (dbPort != null) ? dbPort : "5432";
-            String name = (dbName != null) ? dbName : dbProperties.getProperty("db.url", "").replaceAll(".*/(\\w+)$", "$1");
-            dbProperties.setProperty("db.url", "jdbc:postgresql://" + dbHost + ":" + port + "/" + name);
-        }
-        if (dbUser != null) dbProperties.setProperty("db.username", dbUser);
-        if (dbPass != null) dbProperties.setProperty("db.password", dbPass);
-
-        this.url = dbProperties.getProperty("db.url");
-        this.username = dbProperties.getProperty("db.username");
-        this.password = dbProperties.getProperty("db.password");
-    }
-    
-    /**
-     * Load database properties from database.properties file
-     */
-    private void loadDatabaseProperties() {
-        try (FileInputStream input = new FileInputStream("database.properties")) {
-            dbProperties.load(input);
-            System.out.println("Database properties loaded successfully.");
-            System.out.println("Using database: " + dbProperties.getProperty("db.type"));
-        } catch (IOException e) {
-            System.err.println("Error loading database.properties: " + e.getMessage());
-            // Set default values if properties file not found
-            dbProperties.setProperty("db.type", "postgresql");
-            dbProperties.setProperty("db.url", "jdbc:postgresql://localhost:5432/consulting_booking");
-            dbProperties.setProperty("db.username", "postgres");
-            dbProperties.setProperty("db.password", "postgres");
-            System.out.println("Using default database configuration.");
-        }
+        // Load configuration from .env file via EnvConfig
+        this.url = EnvConfig.getDatabaseUrl();
+        this.username = EnvConfig.get("DB_USER");
+        this.password = EnvConfig.get("DB_PASSWORD");
+        
+        System.out.println("[DatabaseConnection] Using database: " + url.replaceAll("//.*@", "//****@"));
     }
     
     /**

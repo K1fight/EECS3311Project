@@ -26,6 +26,9 @@ public class BookingDAO extends BaseDAO {
      * @return true if successful
      */
     public boolean insert(Booking booking) {
+        String clientIdFromBooking = booking.getClient().getUserID().toString();
+        System.out.println("BookingDAO.insert: clientId=" + clientIdFromBooking + ", consultantId=" + booking.getConsultant().getUserID());
+        
         String sql = """
             INSERT INTO bookings (booking_id, client_id, consultant_id, service_id, start_time, status, current_state)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -182,7 +185,7 @@ public class BookingDAO extends BaseDAO {
 
         BookingState state = createBookingState(stateClassName);
 
-        Booking booking = new Booking(client, consultant, service, startTime);
+        Booking booking = new Booking(bookingId,client, consultant, service, startTime);
         booking.setStatus(status);
         booking.setCurrentState(state);
 

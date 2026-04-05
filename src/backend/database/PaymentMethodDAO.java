@@ -63,21 +63,24 @@ public class PaymentMethodDAO extends BaseDAO {
      */
     public String insert(String clientId, String paymentType, String maskedDetails) {
         String methodId = UUID.randomUUID().toString();
-        // Column name matches DatabaseInitializer: "details"
+        // Escape double quotes in details so JSON stays valid
+        String safeDetails = (maskedDetails != null)
+            ? maskedDetails.replace("\\", "\\\\").replace("\"", "\\\"")
+            : "";
         String sql = """
             INSERT INTO payment_methods (method_id, client_id, payment_type, details, created_at)
             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
             """;
-        
+
         try {
-            int rows = executeUpdate(sql, methodId, clientId, paymentType, maskedDetails);
+            int rows = executeUpdate(sql, methodId, clientId, paymentType, safeDetails);
             if (rows > 0) {
                 return methodId;
             }
         } catch (SQLException e) {
             System.err.println("Error inserting payment method: " + e.getMessage());
         }
-        
+
         return "";
     }
     
@@ -108,14 +111,21 @@ public class PaymentMethodDAO extends BaseDAO {
     /**
      * Delete a payment method
      * @param methodId Method ID
-     * @param clientId Client ID (for verification)
+     * @param clientId Client ID (for verification, may be null after schema migration)
      * @return true if successful
      */
     public boolean delete(String methodId, String clientId) {
-        String sql = "DELETE FROM payment_methods WHERE method_id = ? AND client_id = ?";
-        
+        String sql;
+        int rows;
         try {
-            int rows = executeUpdate(sql, methodId, clientId);
+            if (clientId != null && !clientId.isEmpty()) {
+                sql = "DELETE FROM payment_methods WHERE method_id = ? AND client_id = ?";
+                rows = executeUpdate(sql, methodId, clientId);
+            } else {
+                // FIX: Support deletion when client_id is null (after schema migration)
+                sql = "DELETE FROM payment_methods WHERE method_id = ?";
+                rows = executeUpdate(sql, methodId);
+            }
             return rows > 0;
         } catch (SQLException e) {
             System.err.println("Error deleting payment method: " + e.getMessage());

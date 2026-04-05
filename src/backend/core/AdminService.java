@@ -31,7 +31,7 @@ public class AdminService {
     public void approveConsultant(Consultant consultant) {
         // Set consultant status to approved
         if (userService != null) {
-            userService.approveConsultant(consultant.getEmail());
+            userService.approveConsultant(consultant);
         } else {
             System.out.println("Consultant " + consultant.getName() + " approved.");
         }
@@ -40,7 +40,7 @@ public class AdminService {
     public void rejectConsultant(Consultant consultant) {
         // Reject
         if (userService != null) {
-            userService.rejectConsultant(consultant.getEmail());
+            userService.rejectConsultant(consultant);
         } else {
             System.out.println("Consultant " + consultant.getName() + " rejected.");
         }

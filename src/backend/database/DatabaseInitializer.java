@@ -13,12 +13,24 @@ public class DatabaseInitializer extends BaseDAO {
     /**
      * Initialize database schema
      * Creates all tables if they don't exist
+     *
+     * Set environment variable RESET_DB=true to drop all tables and
+     * re-initialize from scratch (useful during development rebuilds).
      */
     public void initialize() {
         try {
             // Ensure connection is established
             if (!dbConnection.isConnected()) {
                 dbConnection.connect();
+            }
+
+            // Optional: reset database on every startup (development only)
+            String resetDb = System.getenv("RESET_DB");
+            boolean shouldReset = "true".equalsIgnoreCase(resetDb);
+
+            if (shouldReset) {
+                System.out.println("[RESET_DB=true] Dropping all tables...");
+                dropAllTables();
             }
 
             System.out.println("Initializing database schema...");
@@ -30,6 +42,11 @@ public class DatabaseInitializer extends BaseDAO {
             createPaymentsTable();
             createPaymentMethodsTable();
             createConsultantAvailabilityTable();
+
+            // Schema migrations (handle existing tables that need ALTER)
+            migrateBookingsTable();
+            migratePaymentMethodsTable();
+            migratePaymentsTable();
 
             System.out.println("Database schema initialized successfully.");
 
@@ -190,12 +207,8 @@ public class DatabaseInitializer extends BaseDAO {
                 client_id TEXT NOT NULL,
                 consultant_id TEXT NOT NULL,
                 service_id TEXT NOT NULL,
-                start_time TIMESTAMP NOT NULL 
-                CHECK (
-                    start_time >= CURRENT_DATE + INTERVAL '1 day'
-                    AND start_time::time BETWEEN TIME '09:00' AND TIME '17:00'
-                ),
-                status TEXT NOT NULL CHECK(status IN ('Requested', 'Confirmed', 'Paid', 'Rejected', 'Cancelled', 'Completed')),
+                start_time TIMESTAMP NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('Requested', 'Confirmed', 'PendingPayment', 'Paid', 'Rejected', 'Cancelled', 'Completed')),
                 current_state TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -204,7 +217,7 @@ public class DatabaseInitializer extends BaseDAO {
                 FOREIGN KEY (service_id) REFERENCES consulting_services(service_id)
             )
             """;
-        
+
         try (Statement stmt = getConnection().createStatement()) {
             stmt.execute(sql);
             System.out.println("✓ Bookings table created/verified.");
@@ -242,11 +255,11 @@ public class DatabaseInitializer extends BaseDAO {
         String sql = """
             CREATE TABLE IF NOT EXISTS payment_methods (
                 method_id TEXT PRIMARY KEY,
-                client_id TEXT NOT NULL,
+                client_id TEXT,
                 payment_type TEXT NOT NULL,
                 details TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (client_id) REFERENCES users(user_id) ON DELETE CASCADE
+                FOREIGN KEY (client_id) REFERENCES users(user_id) ON DELETE SET NULL
             )
             """;
         
@@ -277,6 +290,107 @@ public class DatabaseInitializer extends BaseDAO {
         }
     }
     
+    /**
+     * Migrate bookings table: update status CHECK constraint to include PendingPayment
+     * Safe to run multiple times — drops and recreates the constraint
+     */
+    private void migrateBookingsTable() {
+        try {
+            var conn = getConnection();
+            var stmt = conn.createStatement();
+
+            // Drop existing constraint if exists
+            String dropConstraint = """
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.table_constraints
+                        WHERE constraint_name = 'bookings_status_check'
+                        AND table_name = 'bookings'
+                    ) THEN
+                        ALTER TABLE bookings DROP CONSTRAINT bookings_status_check;
+                    END IF;
+                END $$
+                """;
+            stmt.execute(dropConstraint);
+
+            // Add updated constraint with PendingPayment
+            String addConstraint = """
+                ALTER TABLE bookings
+                ADD CONSTRAINT bookings_status_check
+                CHECK (status IN ('Requested', 'Confirmed', 'PendingPayment', 'Paid', 'Rejected', 'Cancelled', 'Completed'))
+                """;
+            stmt.execute(addConstraint);
+
+            System.out.println("✓ Bookings table migrated (PendingPayment status added).");
+        } catch (SQLException e) {
+            System.err.println("Migration warning (non-fatal): " + e.getMessage());
+        }
+    }
+
+    /**
+     * Migrate payments table: add method_id column linking to payment_methods
+     * Safe to run multiple times — uses DO NOTHING ON CONFLICT logic
+     */
+    private void migratePaymentsTable() {
+        try {
+            String sql = """
+                DO $$
+                BEGIN
+                    ALTER TABLE payments ADD COLUMN IF NOT EXISTS method_id TEXT
+                        REFERENCES payment_methods(method_id) ON DELETE SET NULL;
+                EXCEPTION WHEN OTHERS THEN
+                    RAISE NOTICE 'payments.method_id column may already exist or migration failed: %', SQLERRM;
+                END
+                $$;
+                """;
+            var stmt = getConnection().createStatement();
+            stmt.execute(sql);
+            System.out.println("✓ Payments table migrated (method_id column added).");
+        } catch (SQLException e) {
+            System.err.println("Error migrating payments table: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Migrate payment_methods table: drop FK constraint and allow NULL client_id
+     * Safe to run multiple times — uses DO NOTHING ON CONFLICT logic
+     */
+    private void migratePaymentMethodsTable() {
+        try {
+            var conn = getConnection();
+            var stmt = conn.createStatement();
+
+            // 1. Remove the old NOT NULL constraint and FK on client_id
+            //    PostgreSQL: drop FK constraint, then drop NOT NULL via ALTER COLUMN
+            String dropFk = """
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.table_constraints
+                        WHERE constraint_name = 'payment_methods_client_id_fkey'
+                        AND table_name = 'payment_methods'
+                    ) THEN
+                        ALTER TABLE payment_methods DROP CONSTRAINT payment_methods_client_id_fkey;
+                    END IF;
+                END $$
+                """;
+            stmt.execute(dropFk);
+
+            // 2. Make client_id nullable (PostgreSQL)
+            String makeNullable = "ALTER TABLE payment_methods ALTER COLUMN client_id DROP NOT NULL";
+            try {
+                stmt.execute(makeNullable);
+            } catch (SQLException alreadyNullable) {
+                // Ignore if already nullable
+            }
+
+            System.out.println("✓ payment_methods table migrated (client_id now nullable, FK removed).");
+        } catch (SQLException e) {
+            System.err.println("Migration warning (non-fatal): " + e.getMessage());
+        }
+    }
+
     /**
      * Drop all tables (for testing/debugging)
      */

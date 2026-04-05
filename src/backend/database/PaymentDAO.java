@@ -18,14 +18,15 @@ public class PaymentDAO extends BaseDAO {
     
     /**
      * Insert a new payment record into database
-     * @param payment Payment to insert
+     * @param transaction PaymentTransaction to insert
      * @param bookingId Associated booking ID
+     * @param methodId  Associated payment method ID (from payment_methods table), may be null
      * @return true if successful
      */
-    public boolean insert(PaymentTransaction transaction, UUID bookingId) {
+    public boolean insert(PaymentTransaction transaction, UUID bookingId, String methodId) {
         String sql = """
-            INSERT INTO payments (payment_id, booking_id, amount, payment_method, payment_detail_masked, status, failure_reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO payments (payment_id, booking_id, method_id, amount, payment_method, payment_detail_masked, status, failure_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """;
         
         try {
@@ -35,6 +36,7 @@ public class PaymentDAO extends BaseDAO {
             int rows = executeUpdate(sql,
                 transaction.getTransactionId().toString(),
                 bookingId.toString(),
+                methodId,
                 transaction.getAmount(),
                 transaction.getPaymentMethod().toString(),
                 transaction.getMaskedDetails(),
@@ -46,6 +48,13 @@ public class PaymentDAO extends BaseDAO {
             System.err.println("Error inserting payment: " + e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * Insert a new payment record (backward-compatible, no method_id)
+     */
+    public boolean insert(PaymentTransaction transaction, UUID bookingId) {
+        return insert(transaction, bookingId, null);
     }
     
     /**

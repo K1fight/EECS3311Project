@@ -168,8 +168,7 @@ public class ServiceDAO extends BaseDAO {
         ServiceCategory category = ServiceCategory.valueOf(categoryStr);
         
         ConsultingService service = new ConsultingService();
-        // Use reflection or setter methods to populate
-        // For now, create a new service with the data
+        service.setServiceId(serviceId);
         service.setName(name);
         service.setDescription(description);
         service.setBasePrice(basePrice);

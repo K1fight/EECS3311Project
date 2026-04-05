@@ -1,18 +1,36 @@
 package backend.user;
 
-import java.util.UUID;
-
+/**
+ * Proxy pattern: controls and guards access to a real User object.
+ *
+ * - All role-specific operations check login state before delegating.
+ * - Only the real object's getAccountType() is forwarded.
+ * - The proxy's own identity fields (name/email) also forward to realUser
+ *   to stay consistent even if realUser's UUID changes.
+ */
 public class UserProxy extends User {
+
     private User realUser;
-    private boolean loggedIn = false;
+
+    // Proxy tracks login state independently so logout works cleanly
+    private boolean isLoggedIn;
+
+    // ======================== Constructors ========================
 
     public UserProxy(User realUser) {
+        // Use a placeholder UUID — getUserID() always delegates to realUser
         super(realUser.getName(), realUser.getEmail(), realUser.getPassword());
         this.realUser = realUser;
+        this.isLoggedIn = false;
     }
 
+    // ======================== Identity Forwarding ========================
+
+    /**
+     * Returns the real user's UUID — never the proxy's own placeholder.
+     */
     @Override
-    public UUID getUserID() {
+    public java.util.UUID getUserID() {
         return realUser.getUserID();
     }
 
@@ -31,131 +49,235 @@ public class UserProxy extends User {
         return realUser.getPassword();
     }
 
+    // ======================== Session Management ========================
+
+    /**
+     * Log the user in through the proxy.
+     * Calls realUser.logIn() and marks the proxy session active.
+     */
     @Override
     public void logIn() {
-        // Pre-processing (e.g., logging)
-        System.out.println("Proxy: Logging in...");
-        realUser.logIn();
-        loggedIn = true;
+        if (!isLoggedIn) {
+            System.out.println("[UserProxy] Logging in " + realUser.getName() + "...");
+            realUser.logIn();
+            this.isLoggedIn = true;
+        }
     }
 
+    /**
+     * Log the user out through the proxy.
+     * Calls realUser.logout() and clears the proxy session.
+     */
     @Override
     public void logout() {
-        System.out.println("Proxy: Logging out...");
-        realUser.logout();
-        loggedIn = false;
+        if (isLoggedIn) {
+            System.out.println("[UserProxy] Logging out " + realUser.getName() + "...");
+            realUser.logout();
+            this.isLoggedIn = false;
+        }
     }
+
+    /**
+     * Whether this proxy's session is currently active.
+     */
+    @Override
+    public boolean isLoggedIn() {
+        return isLoggedIn;
+    }
+
+    // ======================== Account Type ========================
 
     @Override
     public AccountType getAccountType() {
         return realUser.getAccountType();
     }
 
-    // ========== Client method ==========
+    // ======================== Guard ========================
+
+    /**
+     * Throws IllegalStateException if the proxy session is not active.
+     * Call this at the top of every role-specific operation.
+     */
+    private void checkLogin() {
+        if (!isLoggedIn) {
+            throw new IllegalStateException(
+                "Operation requires login. Call logIn() first.");
+        }
+    }
+
+    // ======================== Client Operations ========================
+
     public void browseServices() {
         checkLogin();
-        if (realUser instanceof Client) {
-            ((Client) realUser).browseServices();
+        if (realUser instanceof backend.user.Client c) {
+            c.browseServices();
         } else {
-            throw new UnsupportedOperationException("Not a client");
+            throw new UnsupportedOperationException(
+                "browseServices() is only available for Client accounts.");
         }
     }
 
-    public void requestBooking() {
+    public void requestBooking(backend.core.ConsultingService service,
+                              backend.user.Consultant consultant,
+                              java.time.LocalDateTime startTime) {
         checkLogin();
-        if (realUser instanceof Client) {
-            ((Client) realUser).requestBooking();
+        if (realUser instanceof backend.user.Client c) {
+            c.requestBooking(service, consultant, startTime);
         } else {
-            throw new UnsupportedOperationException("Not a client");
+            throw new UnsupportedOperationException(
+                "requestBooking() is only available for Client accounts.");
         }
     }
 
-    public void cancelBooking() {
+    public void cancelBooking(backend.booking.Booking booking) {
         checkLogin();
-        if (realUser instanceof Client) {
-            ((Client) realUser).cancelBooking();
+        if (realUser instanceof backend.user.Client c) {
+            c.cancelBooking(booking);
         } else {
-            throw new UnsupportedOperationException("Not a client");
+            throw new UnsupportedOperationException(
+                "cancelBooking() is only available for Client accounts.");
         }
     }
 
     public void viewBookingHistory() {
         checkLogin();
-        if (realUser instanceof Client) {
-            ((Client) realUser).viewBookingHistory();
+        if (realUser instanceof backend.user.Client c) {
+            c.viewBookingHistory();
         } else {
-            throw new UnsupportedOperationException("Not a client");
+            throw new UnsupportedOperationException(
+                "viewBookingHistory() is only available for Client accounts.");
         }
     }
 
-    public void processPayment() {
+    public void processPayment(backend.payment.PaymentMethod method,
+                               backend.payment.PaymentTransaction transaction) {
         checkLogin();
-        if (realUser instanceof Client) {
-            ((Client) realUser).processPayment();
+        if (realUser instanceof backend.user.Client c) {
+            c.addPaymentToHistory(transaction);
+            System.out.println("Payment processed via proxy for " + realUser.getName());
         } else {
-            throw new UnsupportedOperationException("Not a client");
+            throw new UnsupportedOperationException(
+                "processPayment() is only available for Client accounts.");
         }
     }
 
-    public void managePaymentMethod() {
+    public void addPaymentMethod(String type, java.util.Map<String, String> details) {
         checkLogin();
-        if (realUser instanceof Client) {
-            ((Client) realUser).managePaymentMethod();
+        if (realUser instanceof backend.user.Client c) {
+            c.addPaymentMethod(type, details);
         } else {
-            throw new UnsupportedOperationException("Not a client");
+            throw new UnsupportedOperationException(
+                "addPaymentMethod() is only available for Client accounts.");
+        }
+    }
+
+    public void listPaymentMethods() {
+        checkLogin();
+        if (realUser instanceof backend.user.Client c) {
+            c.listPaymentMethods();
+        } else {
+            throw new UnsupportedOperationException(
+                "listPaymentMethods() is only available for Client accounts.");
+        }
+    }
+
+    public void removePaymentMethod(int index) {
+        checkLogin();
+        if (realUser instanceof backend.user.Client c) {
+            c.removePaymentMethod(index);
+        } else {
+            throw new UnsupportedOperationException(
+                "removePaymentMethod() is only available for Client accounts.");
         }
     }
 
     public void viewPaymentHistory() {
         checkLogin();
-        if (realUser instanceof Client) {
-            ((Client) realUser).viewPaymentHistory();
+        if (realUser instanceof backend.user.Client c) {
+            c.viewPaymentHistory();
         } else {
-            throw new UnsupportedOperationException("Not a client");
+            throw new UnsupportedOperationException(
+                "viewPaymentHistory() is only available for Client accounts.");
         }
     }
 
-    // ========== Admin method ==========
-    public void approveConsultant() {
+    // ======================== Admin Operations ========================
+
+    public void approveConsultant(Consultant consultant) {
         checkLogin();
-        if (realUser instanceof Admin) {
-            ((Admin) realUser).approveConsultant();
+        if (realUser instanceof Admin a) {
+            a.approveConsultant(consultant);
         } else {
-            throw new UnsupportedOperationException("Not an admin");
+            throw new UnsupportedOperationException(
+                "approveConsultant() is only available for Admin accounts.");
         }
     }
 
-    public void rejectConsultant() {
+    public void rejectConsultant(Consultant consultant) {
         checkLogin();
-        if (realUser instanceof Admin) {
-            ((Admin) realUser).rejectConsultant();
+        if (realUser instanceof Admin a) {
+            a.rejectConsultant(consultant);
         } else {
-            throw new UnsupportedOperationException("Not an admin");
+            throw new UnsupportedOperationException(
+                "rejectConsultant() is only available for Admin accounts.");
         }
     }
 
     public void definePolicies() {
         checkLogin();
-        if (realUser instanceof Admin) {
-            ((Admin) realUser).definePolicies();
+        if (realUser instanceof Admin a) {
+            a.definePolicies();
         } else {
-            throw new UnsupportedOperationException("Not an admin");
+            throw new UnsupportedOperationException(
+                "definePolicies() is only available for Admin accounts.");
         }
     }
 
-    // ========== Consultant method ==========
-    public void provideConsultation() {
+    // ======================== Consultant Operations ========================
+
+    public void provideConsultation(backend.booking.Booking booking) {
         checkLogin();
-        if (realUser instanceof Consultant) {
-            ((Consultant) realUser).provideConsultation();
+        if (realUser instanceof Consultant c) {
+            c.provideConsultation(booking);
         } else {
-            throw new UnsupportedOperationException("Not a consultant");
+            throw new UnsupportedOperationException(
+                "provideConsultation() is only available for Consultant accounts.");
         }
     }
 
-    private void checkLogin() {
-        if (!loggedIn) {
-            throw new IllegalStateException("User not logged in");
+    public void reviewBookingRequest(backend.booking.Booking booking, boolean accept) {
+        checkLogin();
+        if (realUser instanceof Consultant c) {
+            c.reviewBookingRequest(booking, accept);
+        } else {
+            throw new UnsupportedOperationException(
+                "reviewBookingRequest() is only available for Consultant accounts.");
         }
+    }
+
+    public void completeConsultation(backend.booking.Booking booking) {
+        checkLogin();
+        if (realUser instanceof Consultant c) {
+            c.completeConsultation(booking);
+        } else {
+            throw new UnsupportedOperationException(
+                "completeConsultation() is only available for Consultant accounts.");
+        }
+    }
+
+    // ======================== Debug ========================
+
+    /**
+     * Returns the underlying real user — use with caution.
+     * Exposed for services that need direct access (e.g. DB persistence).
+     */
+    public User getRealUser() {
+        return realUser;
+    }
+
+    @Override
+    public String toString() {
+        return String.format("UserProxy[real=%s, loggedIn=%s]",
+            realUser.getUserID(), isLoggedIn);
     }
 }

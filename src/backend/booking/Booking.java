@@ -25,8 +25,8 @@ public class Booking {
 
     private List<BookingObserver> observers = new ArrayList<>();
 
-    public Booking(Client client, Consultant consultant, ConsultingService service, LocalDateTime startTime) {
-        this.bookingId = UUID.randomUUID();
+    public Booking(UUID bookingId, Client client, Consultant consultant, ConsultingService service, LocalDateTime startTime) {
+        this.bookingId = bookingId;
         this.client = client;
         this.consultant = consultant;
         this.service = service;
@@ -35,6 +35,11 @@ public class Booking {
         // Initialize default state to avoid NullPointerException on state transitions
         this.currentState = new RequestedState();
         this.status = BookingStatus.Requested;
+    }
+
+    // Constructor for creating new bookings (auto-generates UUID)
+    public Booking(Client client, Consultant consultant, ConsultingService service, LocalDateTime startTime) {
+        this(UUID.randomUUID(), client, consultant, service, startTime);
     }
 
     public void addObserver(NotificationService observer) {

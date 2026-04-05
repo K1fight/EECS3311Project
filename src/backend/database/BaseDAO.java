@@ -107,7 +107,13 @@ public abstract class BaseDAO {
     protected void setParameters(PreparedStatement stmt, Object... params) throws SQLException {
         if (params != null) {
             for (int i = 0; i < params.length; i++) {
-                stmt.setObject(i + 1, params[i]);
+                Object param = params[i];
+                // Ensure booleans are passed as Boolean, not auto-boxed to Integer
+                if (param instanceof Boolean) {
+                    stmt.setBoolean(i + 1, (Boolean) param);
+                } else {
+                    stmt.setObject(i + 1, param);
+                }
             }
         }
     }

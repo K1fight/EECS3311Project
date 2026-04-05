@@ -75,7 +75,7 @@ public class ConsultantAvailabilityDAO extends BaseDAO {
      */
     public List<TimeSlot> getAvailableSlots(String consultantId, LocalDateTime startDate, LocalDateTime endDate) {
         StringBuilder sql = new StringBuilder(
-            "SELECT * FROM consultant_availability WHERE consultant_id = ? AND is_available = 1"
+            "SELECT * FROM consultant_availability WHERE consultant_id = ? AND is_available::text IN ('true','1','t')"
         );
         
         List<Object> params = new ArrayList<>();
@@ -121,7 +121,7 @@ public class ConsultantAvailabilityDAO extends BaseDAO {
     public boolean isAvailable(String consultantId, LocalDateTime startTime, LocalDateTime endTime) {
         String sql = """
             SELECT COUNT(*) as count FROM consultant_availability
-            WHERE consultant_id = ? AND is_available = 1
+            WHERE consultant_id = ? AND is_available::text IN ('true','1','t')
             AND start_time <= ? AND end_time >= ?
             """;
         
@@ -147,7 +147,7 @@ public class ConsultantAvailabilityDAO extends BaseDAO {
     public boolean markUnavailable(String consultantId, LocalDateTime startTime) {
         String sql = """
             UPDATE consultant_availability 
-            SET is_available = 0 
+            SET is_available = FALSE
             WHERE consultant_id = ? AND start_time = ?
             """;
         

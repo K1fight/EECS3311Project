@@ -21,14 +21,16 @@ public class ConfirmedState implements BookingState {
     public void reject(Booking booking) { throw new IllegalStateException("Cannot reject a confirmed booking."); }
 
     @Override
-    public void pending(Booking booking) { }
+    public void pending(Booking booking) {
+        System.out.println("Booking pending payment.");
+        booking.setState(new PendingPaymentState());
+        booking.setStatus(PendingPayment);
+        booking.notifyObservers();
+    }
 
     @Override
     public void markPaid(Booking booking) {
-        System.out.println("Payment successful. Transitioning to Paid.");
-        booking.setState(new PaidState());
-        booking.setStatus(Paid);
-        booking.notifyObservers();
+        throw new IllegalStateException("Booking must be in PendingPayment state before payment.");
     }
 
     @Override
