@@ -48,7 +48,7 @@ This is a **complete service booking and consulting platform** that connects cli
 ### Phase 2 Features ✅
 - **Docker Deployment** (4 containers: backend, frontend, database, builder)
 - **RESTful API Server** (Embedded HTTP server with JSON API)
-- **AI Customer Assistant Chatbot** (rule-based, privacy-safe)
+- **AI Customer Assistant Chatbot** (rule-based, privacy-safe, connected to LLM)
 
 ---
 
@@ -110,10 +110,6 @@ javac -d build/classes -cp "src:lib/*" src/backend/**/*.java src/frontend/**/*.j
 java -cp "build/classes:lib/*" backend.Main
 ```
 
-3. Run the Swing UI (optional):
-```bash
-java -cp "build/classes:lib/*" frontend.BookingUI
-```
 
 ---
 
@@ -224,58 +220,7 @@ EECS3311Project/
 
 ---
 
-## 7. Demo Workflow
-
-### Quick Demo Path (5 minutes)
-
-1. **Start the application:**
-   ```bash
-   docker-compose up
-   ```
-
-2. **Open http://localhost:3000**
-
-3. **Register as Client:**
-   - Click "Register" tab
-   - Name: `John Doe`
-   - Email: `john@example.com`
-   - Password: `password123`
-   - Account Type: `Client`
-
-4. **Browse Services:**
-   - Navigate to "Browse Services"
-   - View available consulting services
-
-5. **Request Booking:**
-   - Click "Book Now" on a service
-   - Select consultant and time slot
-   - Submit booking request
-
-6. **Login as Consultant:**
-   - Logout and login as consultant
-   - Email: `consultant@example.com`
-   - Password: `demo123`
-   - Account Type: `Consultant`
-
-7. **Accept Booking:**
-   - Go to "Booking Requests"
-   - Click "Accept" on pending request
-
-8. **Login as Client and Pay:**
-   - Logout and login as client
-   - Go to "My Bookings"
-   - Click "Pay Now" on confirmed booking
-
-9. **Consultant Completes:**
-   - Login as consultant
-   - Mark booking as completed
-
-10. **Try AI Chatbot:**
-    - Ask questions like "How do I book?" or "What payment methods?"
-
----
-
-## 8. Booking Lifecycle
+## 7. Booking Lifecycle
 
 ```
 Requested → Confirmed → PendingPayment → Paid → Completed
@@ -296,7 +241,7 @@ Requested → Confirmed → PendingPayment → Paid → Completed
 
 ---
 
-## 9. AI Chatbot Documentation
+## 8. AI Chatbot Documentation
 
 ### Purpose
 The AI Customer Assistant helps clients with:
@@ -310,7 +255,6 @@ The AI Customer Assistant helps clients with:
 - **NO access** to personal user data
 - **NO access** to database or booking details
 - **NO automated actions** (chatbot only provides information)
-- Uses **rule-based responses** from predefined knowledge base
 
 ### Implementation
 - Located: `backend/core/AIChatbotService.java`
@@ -327,7 +271,7 @@ The AI Customer Assistant helps clients with:
 
 ---
 
-## 10. Team Contributions
+## 9. Team Contributions
 
 | Member | Responsibilities | GitHub |
 |--------|-----------------|--------|
@@ -337,14 +281,10 @@ The AI Customer Assistant helps clients with:
 
 ---
 
-## 11. Configuration
+## 10. Configuration
 
-### Environment Variables (.env)
+### Environment Variables (.env.example)
 
-```bash
-# Copy .env.example to .env
-cp .env.example .env
-```
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -362,10 +302,10 @@ cp .env.example .env
 
 ### Phase 1
 - In-memory storage (no persistence without Docker)
-- CLI/Swing frontend only
+- CLI frontend only
 
 ### Phase 2
-- AI chatbot uses rule-based responses (not real LLM)
+- AI chatbot uses LLM
 - Simulated payments (no real payment gateway)
 - Demo credentials for quick testing
 
@@ -398,20 +338,6 @@ curl http://localhost:8080/api/health
 
 ---
 
-## 14. Testing
-
-### Manual Testing Checklist
-- [ ] User registration (Client/Consultant)
-- [ ] User login/logout
-- [ ] Browse services
-- [ ] Create booking
-- [ ] Consultant accept/reject
-- [ ] Client payment
-- [ ] Booking completion
-- [ ] Cancellation with policy
-- [ ] AI chatbot responses
-- [ ] Admin consultant approval
-
 ### API Testing with curl
 ```bash
 # Health check
@@ -425,17 +351,6 @@ curl -X POST http://localhost:8080/api/users/login \
   -H "Content-Type: application/json" \
   -d '{"email":"john@example.com","password":"password123"}'
 ```
-
----
-
-## 15. Future Enhancements (Phase 3)
-
-- Real LLM integration (OpenAI/Claude API)
-- Real payment gateway (Stripe/PayPal)
-- Email notifications
-- Calendar integration
-- Video consultation support
-- Mobile app
 
 ---
 
