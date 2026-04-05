@@ -2,7 +2,7 @@
 
 ## Overview
 
-The AI Customer Assistant is an automated chatbot that helps clients navigate the Service Booking & Consulting Platform. It provides instant responses to common questions about bookings, payments, services, and policies.
+The AI Customer Assistant is an intelligent chatbot integrated with **Alibaba Cloud DashScope (Qwen Turbo)** API. It provides natural language responses to help clients navigate the Service Booking & Consulting Platform.
 
 ---
 
@@ -16,10 +16,16 @@ The AI Customer Assistant is an automated chatbot that helps clients navigate th
 ### Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
-│   Frontend  │────▶│  API Server  │────▶│ AIChatbotService│
-│  (app.js)   │◀────│  (ApiServer) │◀────│  (Knowledge Base)│
-└─────────────┘     └──────────────┘     └─────────────────┘
+┌─────────────┐     ┌──────────────┐     ┌──────────────────────────┐
+│   Frontend  │────▶│  API Server  │────▶│  AIChatbotService         │
+│  (app.js)   │◀────│  (ApiServer) │◀────│  (DashScope API Client)   │
+└─────────────┘     └──────────────┘     └──────────────────────────┘
+                                                    │
+                                                    ▼
+                                            ┌──────────────┐
+                                            │  Qwen Turbo  │
+                                            │  (Aliyun)   │
+                                            └──────────────┘
 ```
 
 ---
@@ -30,14 +36,14 @@ The AI Customer Assistant is an automated chatbot that helps clients navigate th
 
 | Category | Example Questions | Response Type |
 |----------|------------------|---------------|
-| **Greetings** | "Hello", "Hi", "Hey" | Welcome message |
+| **Greetings** | "Hello", "Hi there" | Friendly greeting |
 | **Booking Help** | "How do I book?", "Reserve appointment" | Step-by-step booking guide |
 | **Cancellation** | "Can I cancel?", "Refund policy" | Cancellation rules |
 | **Payments** | "Payment methods?", "Credit card?" | Accepted payment types |
 | **Services** | "What services?", "Career counseling" | Service catalog info |
-| **Consultants** | "Who are consultants?", "Advisor info" | Consultant verification info |
-| **Technical** | "Not working", "Error", "Bug" | Troubleshooting tips |
-| **Hours** | "When open?", "Available hours" | Platform availability |
+| **Consultants** | "Who are consultants?" | Consultant information |
+| **Technical** | "Not working", "Error" | Troubleshooting tips |
+| **General** | Any natural language question | Contextual AI response |
 
 ### What the Chatbot CANNOT Do
 
@@ -45,45 +51,65 @@ The AI Customer Assistant is an automated chatbot that helps clients navigate th
 - ❌ View specific booking details
 - ❌ Process payments or refunds
 - ❌ Modify account information
-- ❌ Connect to external AI APIs (Phase 2 uses rule-based responses)
 - ❌ Take automated actions on behalf of users
 
 ---
 
-## Knowledge Base
+## Configuration
 
-The chatbot uses a predefined knowledge base with categorized responses:
+### Environment Variables (.env)
 
-### Response Categories
+The chatbot is configured via the `.env` file:
 
-```java
-knowledgeBase = {
-    "greeting": ["Hello! How can I assist you today?", ...],
-    "how_to_book": ["You can browse services from the main menu...", ...],
-    "cancellation": ["Our cancellation policy allows full refund...", ...],
-    "payment": ["We accept Credit Cards, Debit Cards, PayPal...", ...],
-    "services": ["We offer Career Counseling, IT Consulting...", ...],
-    "consultant": ["All our consultants are verified professionals...", ...],
-    "technical": ["If you're experiencing technical issues...", ...],
-    "hours": ["Our system is available 24/7 for booking...", ...],
-    "default": ["I'm not sure I understand. Could you rephrase?", ...]
-}
+```bash
+# Alibaba Cloud DashScope Configuration
+AI_API_KEY=your_api_key_here
+AI_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+AI_MODEL_NAME=qwen-turbo
 ```
 
-### Intent Detection
+### Configuration Loading
 
-The chatbot uses keyword matching to detect user intent:
+The service loads configuration from `.env` using `EnvConfig`:
 
-| Intent | Keywords |
-|--------|----------|
-| greeting | hello, hi, hey, greetings, good morning |
-| how_to_book | book, booking, reserve, appointment, schedule |
-| cancellation | cancel, cancellation, refund, money back |
-| payment | pay, payment, credit card, debit card, paypal |
-| services | service, consulting, career, it, finance, price |
-| consultant | consultant, expert, advisor, professional |
-| technical | issue, problem, error, bug, not working |
-| hours | hour, time, available, open, close |
+```java
+this.API_KEY = EnvConfig.get("AI_API_KEY");
+this.API_URL = EnvConfig.get("AI_API_URL");
+this.MODEL = EnvConfig.get("AI_MODEL_NAME");
+```
+
+---
+
+## System Prompt
+
+The chatbot uses a carefully crafted system prompt that provides platform context:
+
+```
+You are a smart customer service assistant for a consulting booking platform.
+
+## Platform Features
+- Users can register as Client or Consultant
+- Clients can browse services, book consultations, make payments, and manage payment methods
+- Consultants can accept/reject bookings and manage availability
+- Admins can approve consultants and set policies
+
+## Service Types
+1. Career Counseling - $100/hour
+2. IT Consulting - $150/hour
+3. Financial Advisory - $200/hour
+
+## Payment Methods
+- Credit Card, Debit Card, PayPal, Bank Transfer
+
+## Cancellation Policy
+- Cancel 48+ hours in advance: Full refund
+- Cancel 24-48 hours in advance: 50% refund
+- Cancel within 24 hours: No refund
+
+## Service Hours
+- System available 24/7
+- Consultants available weekdays 9 AM - 6 PM
+```
 
 ---
 
@@ -108,59 +134,55 @@ POST /api/ai/chat
 ```json
 {
   "success": true,
-  "response": "To book a consultation, go to 'Browse Services' and click 'Book Now' on your preferred service. You'll need to select a consultant and time slot."
+  "response": "To book a consultation, first register as a client and log in..."
 }
 ```
 
-### Error Response
+### Error Responses
 
-```json
-{
-  "success": false,
-  "error": "Message required"
-}
-```
+| Error | Cause | Response |
+|-------|-------|----------|
+| API Key missing | `AI_API_KEY` not set | "Sorry, I cannot answer right now..." |
+| API Error | DashScope returns error | "Sorry, I cannot answer right now. Please try again later..." |
+| Network Error | Connection failure | "Sorry, there is a connection issue. Please try again later." |
 
 ---
 
-## Frontend Integration
+## Code Reference
 
-### Chat UI Component
+### Class: AIChatbotService
 
-The chatbot is embedded in the sidebar of the main application:
-
-```html
-<div class="chatbot-container">
-    <div class="chat-messages" id="chatMessages">
-        <!-- Messages appear here -->
-    </div>
-    <div class="chat-input">
-        <input type="text" id="chatInput" placeholder="Ask me anything...">
-        <button onclick="sendMessage()">Send</button>
-    </div>
-</div>
-```
-
-### JavaScript Implementation
-
-```javascript
-async function sendMessage() {
-    const message = document.getElementById('chatInput').value;
+```java
+public class AIChatbotService {
+    private final String API_KEY;
+    private final String API_URL;
+    private final String MODEL;
+    private final HttpClient httpClient;
+    private final String systemPrompt;
     
-    // Add user message to UI
-    addChatMessage(message, 'user');
-    
-    // Call API
-    const response = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message })
-    });
-    
-    const data = await response.json();
-    addChatMessage(data.response, 'bot');
+    public AIChatbotService() { ... }
+    public String chat(String userMessage) { ... }
+    public String getResponse(String message) { ... }
+    public boolean testConnection() { ... }
 }
 ```
+
+### Key Methods
+
+| Method | Purpose | Return Type |
+|--------|---------|-------------|
+| `chat(String userMessage)` | Send message to AI and get response | `String` |
+| `getResponse(String message)` | Alias for chat (backward compatibility) | `String` |
+| `testConnection()` | Test if AI service is accessible | `boolean` |
+
+### Internal Methods
+
+| Method | Purpose |
+|--------|---------|
+| `buildSystemPrompt()` | Construct platform context prompt |
+| `parseResponse(String)` | Extract content from DashScope response |
+| `toJson(Map)` | Convert Map to JSON string |
+| `escapeJson(String)` | Escape special characters for JSON |
 
 ---
 
@@ -173,17 +195,45 @@ async function sendMessage() {
 | **No Personal Data** | Chatbot never receives user ID, email, or booking details |
 | **No Database Access** | AI service operates independently from database layer |
 | **No Action Execution** | Chatbot only provides information, cannot modify state |
-| **Stateless Design** | No conversation history stored between sessions |
+| **Safe Prompt** | System prompt designed to prevent data leakage |
+| **API Key Security** | Key stored in .env, not hardcoded |
 
-### Safe Response Guidelines
+### Safety Guidelines
 
 The chatbot is designed to:
 - ✅ Provide general platform information
 - ✅ Explain processes and policies
 - ✅ Guide users to appropriate UI sections
+- ✅ Respond in friendly and professional manner
 - ❌ Never reveal user-specific information
 - ❌ Never execute actions on behalf of users
 - ❌ Never store conversation history
+
+---
+
+## Setup Instructions
+
+### 1. Get Alibaba Cloud DashScope API Key
+
+1. Sign up at [Alibaba Cloud](https://www.aliyun.com/)
+2. Navigate to DashScope console
+3. Create an API key for Qwen Turbo model
+
+### 2. Configure Environment
+
+Edit `.env` file in the project root:
+
+```bash
+AI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
+AI_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+AI_MODEL_NAME=qwen-turbo
+```
+
+### 3. Start the Application
+
+```bash
+docker-compose up
+```
 
 ---
 
@@ -191,14 +241,14 @@ The chatbot is designed to:
 
 ### Test Cases
 
-| Test ID | Input | Expected Output |
-|---------|-------|-----------------|
-| TC-001 | "Hello" | Greeting response |
+| Test ID | Input | Expected Behavior |
+|---------|-------|------------------|
+| TC-001 | "Hello" | Friendly greeting response |
 | TC-002 | "How do I book?" | Booking instructions |
-| TC-003 | "Can I get a refund?" | Cancellation policy |
+| TC-003 | "Can I get a refund?" | Cancellation policy explanation |
 | TC-004 | "What payment methods?" | List of payment options |
-| TC-005 | " gibberish" | Default fallback response |
-| TC-006 | "" (empty) | Error or fallback response |
+| TC-005 | " gibberish" | Coherent AI response |
+| TC-006 | "" (empty) | Error handling |
 
 ### Manual Testing
 
@@ -209,36 +259,13 @@ curl -X POST http://localhost:8080/api/ai/chat \
   -d '{"message":"How do I book a consultation?"}'
 ```
 
----
+### Debug Mode
 
-## Future Enhancements (Phase 3)
+Enable debug logging by checking the console output:
 
-### Real LLM Integration
-
-Potential upgrades for future phases:
-
-| Feature | Current (Phase 2) | Future (Phase 3) |
-|---------|------------------|------------------|
-| **Response Generation** | Rule-based keywords | LLM (OpenAI/Claude) |
-| **Context Awareness** | None | Conversation history |
-| **Personalization** | Generic responses | User-specific guidance |
-| **Multi-language** | English only | Multi-language support |
-| **Learning** | Static knowledge base | Continuous improvement |
-
-### Integration Options
-
-```java
-// Future Phase 3 implementation example
-public String getLLMResponse(String userInput, UserContext context) {
-    // Construct prompt with system context
-    String prompt = buildSafePrompt(userInput, context);
-    
-    // Call external AI API
-    String response = openAIService.chat(prompt);
-    
-    // Sanitize and return
-    return sanitizeResponse(response);
-}
+```bash
+# AI API responses are logged
+docker-compose logs app | grep "AI"
 ```
 
 ---
@@ -249,32 +276,54 @@ public String getLLMResponse(String userInput, UserContext context) {
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| No response | API server not running | Start backend with `docker-compose up` |
-| Wrong response | Keyword not matched | Add keyword to intent detection |
-| Slow response | Network latency | Use demo fallback responses |
+| "Sorry, I cannot answer..." | `AI_API_KEY` not set | Set `AI_API_KEY` in `.env` file |
+| Slow response | Network latency | Check internet connection |
+| Generic response | API limits | Check DashScope quota |
+| Connection error | Firewall/proxy | Check network settings |
 
-### Debug Mode
+### Debug Steps
 
-Enable debug logging in `AIChatbotService.java`:
-
-```java
-System.out.println("User input: " + userInput);
-System.out.println("Detected intent: " + detectedIntent);
-System.out.println("Response: " + response);
-```
+1. Check if `.env` file exists and contains `AI_API_KEY`
+2. Verify API key is valid in DashScope console
+3. Check Docker logs: `docker-compose logs app`
+4. Test API key directly with curl
 
 ---
 
-## Code Reference
+## Future Enhancements
 
-### Key Methods
+### Potential Upgrades
 
-| Method | Purpose | Location |
-|--------|---------|----------|
-| `getResponse(String)` | Main entry point for chat | AIChatbotService.java:57 |
-| `initializeKnowledgeBase()` | Setup response categories | AIChatbotService.java:15 |
-| `containsAny(String, List)` | Keyword matching | AIChatbotService.java:89 |
-| `getRandomResponse(String)` | Select response from category | AIChatbotService.java:78 |
+| Feature | Current | Future |
+|---------|---------|--------|
+| **Model** | Qwen Turbo | Qwen Max / GPT-4 |
+| **Context** | Single message | Conversation history |
+| **Personalization** | Generic | User-specific |
+| **Languages** | English | Multi-language |
+
+### Integration Example (Future)
+
+```java
+public String chatWithHistory(String userMessage, List<Message> history) {
+    List<Map<String, String>> messages = new ArrayList<>();
+    
+    // Add conversation history
+    for (Message msg : history) {
+        Map<String, String> m = new HashMap<>();
+        m.put("role", msg.isUser() ? "user" : "assistant");
+        m.put("content", msg.getContent());
+        messages.add(m);
+    }
+    
+    // Add current message
+    Map<String, String> current = new HashMap<>();
+    current.put("role", "user");
+    current.put("content", userMessage);
+    messages.add(current);
+    
+    // Send to API...
+}
+```
 
 ---
 
@@ -282,10 +331,10 @@ System.out.println("Response: " + response);
 
 For questions about the AI chatbot implementation, refer to:
 - Source code: `src/backend/core/AIChatbotService.java`
-- API documentation: `API_DOCUMENTATION.md`
 - Main README: `README.md`
+- Docker setup: `DOCKER_README.md`
 
 ---
 
-**Version:** Phase 2 (Rule-based)  
-**Last Updated:** March 30, 2026
+**Version:** Phase 2 (Alibaba Cloud DashScope Qwen Turbo)  
+**Last Updated:** April 6, 2026
