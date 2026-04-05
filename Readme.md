@@ -46,7 +46,7 @@ This is a **complete service booking and consulting platform** that connects cli
   - Define system policies (cancellation, pricing)
 
 ### Phase 2 Features ✅
-- **Docker Deployment** (4 containers: backend, frontend, database, builder)
+- **Docker Deployment** (3 containers: backend, frontend, database)
 - **RESTful API Server** (Embedded HTTP server with JSON API)
 - **AI Customer Assistant Chatbot** ( privacy-safe, connected to LLM)
 
@@ -75,10 +75,10 @@ This is a **complete service booking and consulting platform** that connects cli
 docker-compose up --build
 ```
 
-This starts 4 containers:
+This starts 3 containers:
 - `eecs3311-db` - PostgreSQL database (port 5434)
-- `eecs3311-app` - Backend API (port 8080)
-- `eecs3311-frontend` - Web UI (port 3000)
+- `eecs3311-backend` - Backend API (port 8080)
+- `eecs3311-frontend` - CLI UI (port 3000)
 
 **Access the application:**
 - Frontend: http://localhost:3000
@@ -130,7 +130,7 @@ EECS3311Project/
 │   │   ├── EnvConfig.java    # Environment configuration
 │   │   └── Main.java         # Application entry point
 │   └── frontend/
-│       ├── BookingUI.java    # Swing GUI frontend
+│       ├── BookingUI.java    # CLI frontend
 │       └── FrontendEnvConfig.java  # Frontend configuration
 ├── diagrams/                 # UML diagrams
 ├── docker-compose.yml        # Docker orchestration
