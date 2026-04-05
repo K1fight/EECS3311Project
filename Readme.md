@@ -48,7 +48,7 @@ This is a **complete service booking and consulting platform** that connects cli
 ### Phase 2 Features ✅
 - **Docker Deployment** (4 containers: backend, frontend, database, builder)
 - **RESTful API Server** (Embedded HTTP server with JSON API)
-- **AI Customer Assistant Chatbot** (rule-based, privacy-safe, connected to LLM)
+- **AI Customer Assistant Chatbot** ( privacy-safe, connected to LLM)
 
 ---
 
