@@ -11,7 +11,7 @@ The AI Customer Assistant is an intelligent chatbot integrated with **Alibaba Cl
 ### Location
 - **Service Class:** `src/backend/core/AIChatbotService.java`
 - **API Endpoint:** `POST /api/ai/chat`
-- **Frontend Component:** `frontend/app.js` (sendMessage function)
+- **Frontend Component:** `frontend/BookingUI.java` (sendMessage function)
 
 ### Architecture
 
