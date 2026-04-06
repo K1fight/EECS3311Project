@@ -79,10 +79,10 @@ docer attach eecs3311-frontend
 This starts 3 containers:
 - `eecs3311-db` - PostgreSQL database (port 5434)
 - `eecs3311-backend` - Backend API (port 8080)
-- `eecs3311-frontend` - CLI UI (port 3000)
+- `eecs3311-frontend` - CLI UI 
 
 **Access the application:**
-- Frontend: http://localhost:3000
+- docker attach eecs3311-frontend
 - API: http://localhost:8080/api
 - Health check: http://localhost:8080/api/health
 
@@ -294,7 +294,6 @@ The AI Customer Assistant helps clients with:
 | `DB_USER` | myuser | Database user |
 | `DB_PASSWORD` | mypassword | Database password |
 | `SERVER_PORT` | 8080 | API server port |
-| `FRONTEND_PORT` | 3000 | Frontend port |
 
 ---
 
